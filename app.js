@@ -2269,7 +2269,7 @@
 
   /* 그스룸 함께 쓰는 사람: 이름 | 학번 연도 - 나머지 칸 (user 2026-11-14). rows: [[이름, 연도, 나머지], ...] */
   const nameWidth = (s) => `${Math.max(3, [...String(s || "")].length) + 1.6}em`;  // a 3-letter name fits; longer names widen the box
-  const mateRow = (m, i) => `<div class="mate" data-i="${i}"><input class="ask m-name" data-f="0" style="width:${nameWidth(m[0])}" value="${esc(m[0])}" placeholder="이름" maxlength="20" autocomplete="off" aria-label="이름"><input class="ask m-y" data-f="1" value="${esc(m[1])}" placeholder="2022" inputmode="numeric" autocomplete="off" aria-label="학번 앞 4자리(입학 연도)"><span class="m-dash">-</span><input class="ask m-n" data-f="2" value="${esc(m[2])}" placeholder="12345" maxlength="8" inputmode="numeric" autocomplete="off" aria-label="학번 뒤 자리"><button class="ibtn m-del" data-mdel="${i}" title="이 줄 지우기" aria-label="이 줄 지우기">✕</button></div>`;
+  const mateRow = (m, i) => `<div class="mate" data-i="${i}"><input class="ask m-name" data-f="0" style="width:${nameWidth(m[0])}" value="${esc(m[0])}" placeholder="이름" maxlength="20" autocomplete="off" aria-label="이름"><input class="ask m-y" data-f="1" value="${esc(m[1])}" placeholder="2020" inputmode="numeric" autocomplete="off" aria-label="학번 앞 4자리(입학 연도)"><span class="m-dash">-</span><input class="ask m-n" data-f="2" value="${esc(m[2])}" placeholder="12345" maxlength="8" inputmode="numeric" autocomplete="off" aria-label="학번 뒤 자리"><button class="ibtn m-del" data-mdel="${i}" title="이 줄 지우기" aria-label="이 줄 지우기">✕</button></div>`;
   const matesHtml = (rows) => `<div class="mates">${rows.map(mateRow).join("")}</div><button class="ghost m-add" data-madd="1">+ 사람 추가</button>`;
   const matesText = (rows) => rows.filter((m) => m[0].trim() || m[1] || m[2]).map((m) => `${m[0].trim().replace(/\s+/g, " ") || "?"} ${m[1]}${m[2]}`).join("\n");
   const matesFrom = (pairs) => { const out = (pairs || []).map(([n, no]) => [String(n), String(no).slice(0, 4), String(no).slice(4)]); while (out.length < 3) out.push(["", "", ""]); return out; };
@@ -2289,7 +2289,7 @@
     rows.splice(+del.dataset.mdel, 1); while (rows.length < 3) rows.push(["", "", ""]); return true;
   };
 
-  /* ---------- 그스룸 예약 (P-019): Aside(기본, D-069) 또는 Claude in Chrome이 예약·반납하고, 앱은 결과만 보여 준다 ---------- */
+  /* ---------- 그룹스터디룸 예약 (P-019): Aside(기본, D-069) 또는 Claude in Chrome이 예약·반납하고, 앱은 결과만 보여 준다 ---------- */
   function openRoom(only) {
     document.querySelectorAll(".room-scrim").forEach((s) => s.remove());
     const publicRooms = (ui.info.edition || {}).name === "public";
@@ -2300,7 +2300,7 @@
     scrim.className = "scrim cal-scrim room-scrim";
     scrim.innerHTML = rulesOnly
       ? `<div class="cal-panel room-panel room-rules"><div class="cal-head"><b>그스룸 정기 예약</b><small class="room-sub">매주 같은 요일·시각에 자동 예약 (30분~12시간)</small><span class="grow"></span><button class="ghost" data-c="full">그스룸 창</button><button class="ibtn" data-c="close" title="닫기">✕</button></div><div class="room-job" id="roomJob" hidden></div><div class="room-main room-rules-body" id="roomMain"></div></div>`
-      : `<div class="cal-panel room-panel"><div class="cal-head"><b>그스룸 예약</b><small class="room-sub">관정관 4층 6인실 · ${publicRooms ? "최대 3시간 · 예약마다 확인" : "30분~12시간(3시간을 넘으면 이어서)"} · 신청인+동반 3명</small><span class="grow"></span>${publicRooms ? "" : `<button class="ghost" data-c="rules">정기 예약</button>`}<button class="ghost" data-c="refresh">예약 목록 확인</button><button class="ibtn" data-c="close" title="닫기">✕</button></div><div class="room-job" id="roomJob" hidden></div><div class="room-chat"><div class="room-chat-log" id="roomChatLog" hidden></div><div class="room-chat-in"><input id="rChat" autocomplete="off" maxlength="300" placeholder="${publicRooms ? "예: 내일 2시부터 2시간 예약" : "말로 지시하세요 — 내일 2시부터 6시간 예약 · 수요일 거 취소"}"><button class="primary" data-c="chat" id="rChatGo">보내기</button></div></div><div class="cal-body"><div class="room-main" id="roomMain"></div><div class="cal-side" id="roomSide"></div></div></div>`;
+      : `<div class="cal-panel room-panel"><div class="cal-head"><b>그룹스터디룸 예약</b><small class="room-sub">관정관 4층 6인실 · ${publicRooms ? "최대 3시간 · 예약마다 확인" : "30분~12시간(3시간을 넘으면 이어서)"} · 신청인+동반 3명</small><span class="grow"></span>${publicRooms ? "" : `<button class="ghost" data-c="rules">정기 예약</button>`}<button class="ghost" data-c="refresh">예약 목록 확인</button><button class="ibtn" data-c="close" title="닫기">✕</button></div><div class="room-job" id="roomJob" hidden></div>${publicRooms ? "" : `<div class="room-chat"><div class="room-chat-log" id="roomChatLog" hidden></div><div class="room-chat-in"><input id="rChat" autocomplete="off" maxlength="300" placeholder="말로 지시하세요 — 내일 2시부터 6시간 예약 · 수요일 거 취소"><button class="primary" data-c="chat" id="rChatGo">보내기</button></div></div>`}<div class="cal-body"><div class="room-main" id="roomMain"></div><div class="cal-side" id="roomSide"></div></div></div>`;
     document.body.appendChild(scrim); keepFocus(scrim);
     const main = scrim.querySelector("#roomMain"), side = scrim.querySelector("#roomSide"), banner = scrim.querySelector("#roomJob");
     let timer = null;
@@ -2346,6 +2346,7 @@
       chatLog.scrollTop = chatLog.scrollHeight;
     };
     const sendChat = async () => {
+      if (!chatIn) return;  // public edition: manual booking only (user 2026-11-14)
       const text = (chatIn.value || "").trim();
       if (!text || st.thinking) return;
       chatIn.value = ""; st.thinking = true;

@@ -256,6 +256,12 @@ window.__DEMO_CALLS = {"init[]": {"courses": [{"folder": "유체역학 체험", 
     live_engine_set: (v) => { liveEngine = v; return { ok: true }; },
     side_view: () => ({ ok: true, note: "체험판: 앱에서는 창이 화면 오른쪽 1/3로 붙어요" }),
   };
+  // the web trial shows the school ChatGPT (Codex) note engine only: other engines recorded on the builder's PC are left out
+  function scrub(v) {
+    if (Array.isArray(v)) return v.filter((x) => !(x && typeof x === "object" && /Claude/.test(String(x.label || x.name || "")))).map(scrub);
+    if (v && typeof v === "object") { delete v.claude; for (const k of Object.keys(v)) v[k] = scrub(v[k]); }
+    return v;
+  }
   function answer(name, args) {
     if (name in LIVE) return LIVE[name](...args);
     if (name === "setup_info") {  // ?setup=1 shows the first-run wizard (optional tools listed: the note engines the public build offers)
@@ -294,7 +300,7 @@ window.__DEMO_CALLS = {"init[]": {"courses": [{"folder": "유체역학 체험", 
   window.pywebview = { api: new Proxy({}, { get(_, name) {
     if (typeof name !== "string" || name === "then") return undefined;
     return (...args) => new Promise((resolve) => setTimeout(() => {
-      const out = clone(answer(name, args) ?? { ok: true });
+      const out = scrub(clone(answer(name, args) ?? { ok: true }));
       (window.__demoLog || (window.__demoLog = [])).push([name, out && out.ok === false ? out.error || out.reason : ""]);
       if (window.__demoLog.length > 300) window.__demoLog.shift();
       resolve(out);
