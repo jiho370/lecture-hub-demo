@@ -3275,7 +3275,7 @@
       ${c.slots.map((s, j) => `<span class="slot" data-j="${j}"><select class="sday">${TT_DAYS.map((d) => `<option${d === s.day ? " selected" : ""}>${d}</option>`).join("")}</select>
         <input class="ask short sstart" value="${esc(s.start)}" size="5"> ~ <input class="ask short send" value="${esc(s.end)}" size="5"><button class="ghost" data-tt="unslot" data-i="${i}" data-j="${j}" title="이 시간 빼기">×</button></span>`).join("")}
       <button class="ghost" data-tt="slot" data-i="${i}">+ 다른 요일·시간</button><button class="ghost" data-tt="del" data-i="${i}">삭제</button></div>`).join("")}</div>
-      <button class="ghost" data-tt="add">+ 과목 추가</button><button class="ghost" data-tt="etl" title="연결한 eTL에서 이번 학기 과목 이름을 가져옵니다(요일·시간은 직접)">eTL에서 과목 불러오기</button>`;
+      <button class="ghost" data-tt="add">+ 과목 추가</button>`;
   }
   function ttRead(box) {
     return [...box.querySelectorAll(".crs")].map((c) => {
@@ -3283,16 +3283,6 @@
       return { name: name.value.trim(), folder: name.dataset.folder || "",
         slots: [...c.querySelectorAll(".slot")].map((s) => ({ day: s.querySelector(".sday").value, start: s.querySelector(".sstart").value.trim(), end: s.querySelector(".send").value.trim() })) };
     });
-  }
-  function etlAddCourses(list, names) {  // eTL names not in the list yet; an empty first row is filled first
-    let added = 0;
-    for (const name of names) {
-      if (list.some((c) => c.name === name)) continue;
-      const blank = list.find((c) => !c.name);
-      if (blank) blank.name = name; else list.push({ name, folder: "", slots: [{ day: "월", start: "09:00", end: "10:15" }] });
-      added += 1;
-    }
-    return added;
   }
   function openTimetable() {
     return new Promise(async (resolve) => {
@@ -3321,11 +3311,6 @@
         else if (act === "slot") st.courses[i].slots.push({ day: "수", start: "09:00", end: "10:15" });
         else if (act === "unslot") st.courses[i].slots.splice(+b.dataset.j, 1);
         else if (act === "del") st.courses.splice(i, 1);
-        else if (act === "etl") {
-          const r = await api.etl_courses("", "");
-          if (r && r.ok) { const n = etlAddCourses(st.courses, r.courses || []); st.error = n ? "" : "새로 더할 과목이 없습니다."; if (n) toast(`eTL에서 ${n}과목을 불러왔습니다 — 요일·시간을 고치세요`); }
-          else st.error = (r && r.error) || "불러오지 못했습니다.";
-        }
         else if (act === "save") {
           st.busy = true; st.error = ""; draw();
           const r = await api.timetable_save(st.courses.filter((c) => c.name), st.start, st.end);
@@ -3378,10 +3363,7 @@
             ${c.slots.map((s, j) => `<span class="slot" data-j="${j}"><select class="sday">${days.map((d) => `<option${d === s.day ? " selected" : ""}>${d}</option>`).join("")}</select>
               <input class="ask short sstart" value="${esc(s.start)}" size="5"> ~ <input class="ask short send" value="${esc(s.end)}" size="5"></span>`).join("")}
             <button class="ghost" data-act="slot" data-i="${i}">+ 다른 요일·시간</button><button class="ghost" data-act="del" data-i="${i}">삭제</button></div>`).join("")}</div>
-          <button class="ghost" data-act="add">+ 과목 추가</button>
-          <div class="etl-pull"><b>eTL에서 과목 불러오기</b> <small>eTL은 과목 이름만 알려 줘요. 요일·시간은 불러온 뒤 고치세요.</small>
-            <div class="row"><input id="su-etl" class="ask" type="password" autocomplete="off" placeholder="eTL 액세스 토큰 (eTL › 계정 › 설정 › 새 액세스 토큰)">
-            <button data-act="etlpull"${st.busy ? " disabled" : ""}>불러오기</button></div>${st.etlMsg ? `<p class="hint">${esc(st.etlMsg)}</p>` : ""}</div>`;
+          <button class="ghost" data-act="add">+ 과목 추가</button>`;
         if (st.step === 3) {
           if (!st.layout) return `<p class="hint">불러오는 중…</p>`;
           const note = st.style === "existing" ? `<p class="hint">이미 쓰는 폴더: 앞에서 고른 <b>${esc(st.parent)}</b> 폴더를 학기 폴더로 그대로 씁니다(그 안에 _lecturehub만 더합니다).</p>` : "";
@@ -3449,17 +3431,6 @@
           scrim.innerHTML = `<div class="dialog wide" role="dialog"><h4>체험 학기를 만들었어요</h4><p>'${esc(r.course || "체험 과목")}' 강의 1개와 정리본이 들어 있습니다. 앱을 다시 켜면 체험 학기로 열립니다.</p>
             <div class="acts"><button class="primary" data-act="close">앱 닫기</button></div></div>`;
           return;
-        }
-        if (act === "etlpull") {
-          const token = (scrim.querySelector("#su-etl") || {}).value || "";
-          st.busy = true; st.etlMsg = "eTL에서 과목을 불러오는 중…"; draw();
-          const r = await api.etl_courses(st.term, token);
-          st.busy = false;
-          if (r && r.ok) {
-            const n = etlAddCourses(st.courses, r.courses || []);
-            st.etlMsg = n ? `${n}과목을 불러왔어요${r.saved ? " · 토큰은 이 PC에 저장" : ""} — 요일·시간을 고치세요` : "새로 더할 과목이 없어요";
-          } else st.etlMsg = (r && r.error) || "불러오지 못했습니다.";
-          draw(); return;
         }
         if (act === "add") st.courses.push({ name: "", slots: [{ day: "월", start: "09:00", end: "10:15" }] });
         else if (act === "slot") st.courses[i].slots.push({ day: "수", start: "09:00", end: "10:15" });

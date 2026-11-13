@@ -117,8 +117,10 @@ window.__DEMO_CALLS = {"init[]": {"courses": [{"folder": "유체역학 체험", 
 
   // ---- key connection: kept in this tab only (never stored, never sent); all keys start disconnected
   const conn = {};  // provider -> true
-  function connStatus() {
+  function connStatus(login) {
     const v = clone(CALLS["conn_status[]"] || { ok: true, keys: [] });
+    if (login && window.__demoCodex) sim.codex = true;  // the video shows: npm install, codex login, then [프로그램 다시 찾기]
+    (v.tools || []).forEach((t) => { if (t.id === "codex") { t.found = !!sim.codex; t.signed_in = sim.codex ? true : undefined; } });
     (v.keys || []).forEach((k) => { k.connected = !!conn[k.id]; k.source = conn[k.id] ? "keyring" : null; });
     return v;
   }
@@ -137,7 +139,7 @@ window.__DEMO_CALLS = {"init[]": {"courses": [{"folder": "유체역학 체험", 
     if (!etl.synced) return clone(CALLS["etl_board[]"] || { ok: true, announcements: [], files: [], have: 0, total: 0, closed: [] });
     return { ok: true, at: etl.synced / 1000, have: 2, total: 3, closed: [],
       announcements: [
-        { id: "a1", course: COURSE, posted: iso(day(-1)) + "T18:20", title: "쪽지 퀴즈 안내", text: "다음 주 수요일 수업 시작 10분 동안 오늘 배운 손실수두 계산으로 쪽지 퀴즈를 봅니다. 계산기를 가져오세요.", attachments: [] },
+        { id: "a1", course: COURSE, posted: iso(day(-1)) + "T18:20", title: "다음 주 실습 안내", text: "다음 주 수요일에는 오늘 배운 손실수두 계산을 직접 해 보는 실습을 합니다. 계산기와 지난주 슬라이드를 가져오세요.", attachments: [] },
         { id: "a2", course: COURSE, posted: iso(day(-3)) + "T09:02", title: "과제 1 공지", text: "관수로 마찰손실 문제 3개. 풀이 과정과 단위를 모두 쓰세요.", attachments: ["과제1_관수로.pdf"] },
       ],
       files: [{ id: 101, course: COURSE, name: "3주차_관수로흐름.pdf", size: 2400000, updated: iso(day(-1)) + "T17:55", state: "missing", big: false }] };
@@ -155,7 +157,12 @@ window.__DEMO_CALLS = {"init[]": {"courses": [{"folder": "유체역학 체험", 
     v.year = year; v.month = month;
     const mine = extraEvents.slice();
     if (etl.synced) mine.push({ id: "etl-1", date: iso(day(9)), title: "과제 1 관수로 마찰손실", kind: "assignment", course: COURSE, source: "etl", status: "todo", time: "23:59" });
-    v.events = (v.events || []).concat(mine.filter((e) => e.date && e.date.startsWith(`${year}-${String(month).padStart(2, "0")}`)));
+    const inMonth = (e) => e.date && e.date.startsWith(`${year}-${String(month).padStart(2, "0")}`);
+    const LABEL = { assignment: "과제", exam: "시험", closure: "휴강", makeup: "보강", personal: "개인" };
+    v.events = (v.events || []).concat(mine.filter((e) => inMonth(e) && e.kind !== "closure")
+      .map((e) => Object.assign({ kind_label: LABEL[e.kind] || "일정" }, e)));
+    v.exceptions = (v.exceptions || []).concat(mine.filter((e) => inMonth(e) && e.kind === "closure")  // the app keeps a closure as a class exception
+      .map((e) => ({ date: e.date, course: e.course || COURSE, kind: "휴강", note: e.title || "", confirmation: "confirmed_by_user" })));
     const today = new Date(iso(new Date()));
     v.upcoming = (v.upcoming || []).concat(mine.filter((e) => e.date >= iso(new Date()))
       .map((e) => Object.assign({ start_ms: null, kind_label: "과제" }, e, { d_day: Math.round((new Date(e.date) - today) / 864e5) })));
@@ -220,6 +227,17 @@ window.__DEMO_CALLS = {"init[]": {"courses": [{"folder": "유체역학 체험", 
 
   let liveEngine = "quick";
   const SETUP = /[?&]setup=1/.test(location.search);
+  const look = clone(CALLS["appearance[]"] || { ok: true, theme: "system", text_size: "normal" });
+  // the mini window: the app hides the main window and shows a small always-on-top one; here it floats over a dimmed page
+  function showMini() {
+    if (document.getElementById("demoMini")) return { ok: true };
+    const box = document.createElement("div");
+    box.id = "demoMini";
+    box.innerHTML = '<div class="dm-desk"></div><div class="dm-win"><div class="dm-bar">수업 녹음 · 미니</div><iframe src="mini.html" title="미니 창"></iframe></div>';
+    document.body.appendChild(box);
+    return { ok: true };
+  }
+  function showMain() { const b = document.getElementById("demoMini"); if (b) b.remove(); return { ok: true }; }
   const LIVE = {
     conn_status: connStatus, conn_connect: connConnect, conn_test: (p) => (conn[p] ? { ok: true } : { ok: false, error: "연결된 키가 없어요" }),
     conn_remove: (p) => { delete conn[p]; return { ok: true }; },
@@ -248,16 +266,24 @@ window.__DEMO_CALLS = {"init[]": {"courses": [{"folder": "유체역학 체험", 
     make_note: makeNote, note_status: noteStatus,
     search: (q) => search(q),
     probe: () => ({ ok: true }),
+    appearance: (theme, size) => { if (theme) look.theme = theme; if (size) look.text_size = size; return clone(look); },
+    show_mini: showMini, show_main: showMain, set_on_top: () => ({ ok: true }),
+    next_class_answer: () => ({ ok: true }), class_over_answer: () => ({ ok: true }),
+    start_selected: () => start(),
     save_memo: () => ({ ok: true, saved_at: Date.now() / 1000 }), bookmark: () => ({ ok: true }),
     suggest_course: () => ({ course: COURSE }),  // the trial timetable's class, whatever day the page is opened
     sidebar_state: () => ({ ok: true }), set_selection: () => ({ ok: true }), notices_seen: () => ({ ok: true }),
-    class_reminder_set: () => ({ ok: true }), show_mini: () => ({ ok: true }),
+    class_reminder_set: () => ({ ok: true }),
     live_engine_get: () => ({ ok: true, engine: liveEngine, choices: { quick: "Gemini Live — 말하자마자 글로(무료 Gemini 키, 소음에 약함)", chirp: "Chirp 3 — 더 정확, 15~25초 늦게 나옴(Google Cloud 로그인, 월 60분 무료 뒤 유료)", both: "둘 다 — 빠른 줄을 먼저 보이고 Chirp 줄로 확정" } }),
     live_engine_set: (v) => { liveEngine = v; return { ok: true }; },
     side_view: () => ({ ok: true, note: "체험판: 앱에서는 창이 화면 오른쪽 1/3로 붙어요" }),
   };
   // the web trial shows the school ChatGPT (Codex) note engine only: other engines recorded on the builder's PC are left out
+  const SOFT = [["중간고사에 그대로 나오니까", "다음 실습에서 그대로 쓰니까"], ["중간고사에 그대로 나온다고 했다", "다음 실습에서 그대로 쓴다고 했다"],
+    ["쪽지 퀴즈 볼 거예요", "확인 문제를 같이 풀 거예요"], ["쪽지 퀴즈가 있다", "확인 문제를 함께 푼다"], ["쪽지 퀴즈", "확인 문제"], ["퀴즈", "확인 문제"]];
+  const soft = (s) => SOFT.reduce((a, [x, y]) => a.split(x).join(y), s);
   function scrub(v) {
+    if (typeof v === "string") return soft(v);
     if (Array.isArray(v)) return v.filter((x) => !(x && typeof x === "object" && /Claude/.test(String(x.label || x.name || "")))).map(scrub);
     if (v && typeof v === "object") { delete v.claude; for (const k of Object.keys(v)) v[k] = scrub(v[k]); }
     return v;
@@ -270,14 +296,14 @@ window.__DEMO_CALLS = {"init[]": {"courses": [{"folder": "유체역학 체험", 
       return v;
     }
     if (name === "setup_apply") return { ok: true };
-    if (name === "etl_courses") {  // synthetic eTL course list (eTL gives names only, no class times)
-      if (!String(args[1] || "").trim() && !conn.etl) return { ok: false, error: "eTL 액세스 토큰을 붙여 넣으세요 (체험판: 아무 글자 8자 이상)" };
-      if (String(args[1] || "").trim()) conn.etl = true;
-      return { ok: true, courses: ["유체역학 체험", "공학수학 체험", "과학과 글쓰기 체험"], term: "2026-2", saved: !!String(args[1] || "").trim() };
-    }
-    if (name === "folder_layout_get" && args[0]) {  // the tree with the term and course names typed in the wizard
+    if (name === "folder_layout_get") {  // the tree with the term and course names typed in the wizard
       const v = clone(byName.folder_layout_get), names = (args[1] || []).length ? args[1] : ["과목 이름"];
-      for (const k of Object.keys(v.previews || {})) v.previews[k] = [].concat(...v.previews[k].map((line, i) => i === 0 ? [args[0] + "\\"] : line.includes("과목 이름") ? names.map((n) => line.replace("과목 이름", n)) : [line]));
+      const short = (l) => l.replace("  (파일이 생길 때 만듦)", "").replace("앱이 쓰는 폴더 (녹음 원본·전사·기록)", "앱이 쓰는 폴더").replace("녹음 보관용 복사본", "보관용 복사본");
+      for (const k of Object.keys(v.previews || {})) {  // recorded before the preview got short lines (setup.layout_preview)
+        const had = v.previews[k].some((l) => l.includes("파일이 생길 때"));
+        v.previews[k] = v.previews[k].map(short).concat(had ? ["", "과목 안 폴더는 파일이 생길 때 만듭니다."] : []);
+      }
+      for (const k of Object.keys(v.previews || {})) v.previews[k] = [].concat(...v.previews[k].map((line, i) => i === 0 ? [(args[0] || line.replace(/\\$/, "")) + "\\"] : line.includes("과목 이름") ? names.map((n) => line.replace("과목 이름", n)) : [line]));
       return v;
     }
     if (name === "setup_close") { location.href = location.pathname; return { ok: true }; }
@@ -314,7 +340,7 @@ window.__DEMO_CALLS = {"init[]": {"courses": [{"folder": "유체역학 체험", 
     document.body.prepend(bar);
     bar.querySelector("#demoReset").onclick = () => { try { sessionStorage.clear(); localStorage.clear(); } catch (e) { /* */ } location.reload(); };
     const css = document.createElement("style");
-    css.textContent = ".demo-note{position:fixed;left:50%;bottom:84px;transform:translateX(-50%);z-index:9999;max-width:min(560px,92vw);padding:12px 16px;border-radius:12px;background:var(--accent);color:#fff;font-size:14px;box-shadow:0 8px 28px rgba(0,0,0,.18)}";
+    css.textContent = "#demoMini{position:fixed;inset:0;z-index:9998}#demoMini .dm-desk{position:absolute;inset:0;background:rgba(30,34,32,.55);backdrop-filter:blur(3px)}#demoMini .dm-win{position:absolute;right:28px;bottom:28px;width:340px;border-radius:10px;overflow:hidden;box-shadow:0 18px 50px rgba(0,0,0,.35);background:#faf7f0}#demoMini .dm-bar{font-size:12px;padding:6px 10px;background:#2b2f2d;color:#eee}#demoMini iframe{display:block;width:340px;height:150px;border:0}.demo-note{position:fixed;left:50%;bottom:84px;transform:translateX(-50%);z-index:9999;max-width:min(560px,92vw);padding:12px 16px;border-radius:12px;background:var(--accent);color:#fff;font-size:14px;box-shadow:0 8px 28px rgba(0,0,0,.18)}";
     document.head.appendChild(css);
   });
 })();
