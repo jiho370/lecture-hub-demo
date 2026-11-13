@@ -1059,3 +1059,6 @@ body:has(.qa-panel.with-deck) .cap-panel{display:none}
 .recmini.on .dot { background: var(--rec); }
 
 .mate input.m-name, .dialog .mate input.m-name { width: 4.6em; text-align: center; }
+.etl-pull{margin-top:14px;padding:12px 14px;border:1px dashed var(--line,#d9d2c3);border-radius:12px}
+.etl-pull .row{margin-top:8px}
+.etl-pull .row input{flex:1;min-width:0}

@@ -125,7 +125,7 @@ window.__DEMO_CALLS = {"init[]": {"courses": [{"folder": "유체역학 체험", 
   function connConnect(provider, key) {
     if (String(key || "").trim().length < 8) return { ok: false, error: "키가 너무 짧아요 (체험판: 아무 글자 8자 이상이면 연결된 것으로 보여 줘요)" };
     conn[provider] = true;
-    return { ok: true };
+    return { ok: true, saved: true };
   }
 
   // ---- eTL: connected after a token is "connected" above; [지금 가져오기] fills synthetic notices, deadlines, files
@@ -142,7 +142,8 @@ window.__DEMO_CALLS = {"init[]": {"courses": [{"folder": "유체역학 체험", 
       ],
       files: [{ id: 101, course: COURSE, name: "3주차_관수로흐름.pdf", size: 2400000, updated: iso(day(-1)) + "T17:55", state: "missing", big: false }] };
   }
-  function etlSync() {
+  function etlSync(force, token) {
+    if (String(token || "").trim().length >= 8) conn.etl = true;
     if (!conn.etl) return { ok: false, error: "먼저 설정 › 계정 연결에서 eTL 토큰을 연결하세요 (체험판: 아무 글자 8자 이상)" };
     etl.synced = Date.now();
     return { ok: true, count: 1, added: 1, updated: 0, board: { announcements: 2, files: 1 } };
@@ -155,7 +156,9 @@ window.__DEMO_CALLS = {"init[]": {"courses": [{"folder": "유체역학 체험", 
     const mine = extraEvents.slice();
     if (etl.synced) mine.push({ id: "etl-1", date: iso(day(9)), title: "과제 1 관수로 마찰손실", kind: "assignment", course: COURSE, source: "etl", status: "todo", time: "23:59" });
     v.events = (v.events || []).concat(mine.filter((e) => e.date && e.date.startsWith(`${year}-${String(month).padStart(2, "0")}`)));
-    v.upcoming = (v.upcoming || []).concat(mine.filter((e) => e.date >= iso(new Date())));
+    const today = new Date(iso(new Date()));
+    v.upcoming = (v.upcoming || []).concat(mine.filter((e) => e.date >= iso(new Date()))
+      .map((e) => Object.assign({ start_ms: null, kind_label: "과제" }, e, { d_day: Math.round((new Date(e.date) - today) / 864e5) })));
     return v;
   }
 
@@ -216,6 +219,7 @@ window.__DEMO_CALLS = {"init[]": {"courses": [{"folder": "유체역학 체험", 
   }
 
   let liveEngine = "quick";
+  const SETUP = /[?&]setup=1/.test(location.search);
   const LIVE = {
     conn_status: connStatus, conn_connect: connConnect, conn_test: (p) => (conn[p] ? { ok: true } : { ok: false, error: "연결된 키가 없어요" }),
     conn_remove: (p) => { delete conn[p]; return { ok: true }; },
@@ -244,18 +248,37 @@ window.__DEMO_CALLS = {"init[]": {"courses": [{"folder": "유체역학 체험", 
     make_note: makeNote, note_status: noteStatus,
     search: (q) => search(q),
     probe: () => ({ ok: true }),
+    save_memo: () => ({ ok: true, saved_at: Date.now() / 1000 }), bookmark: () => ({ ok: true }),
     suggest_course: () => ({ course: COURSE }),  // the trial timetable's class, whatever day the page is opened
     sidebar_state: () => ({ ok: true }), set_selection: () => ({ ok: true }), notices_seen: () => ({ ok: true }),
     class_reminder_set: () => ({ ok: true }), show_mini: () => ({ ok: true }),
-    live_engine_get: () => ({ ok: true, engine: liveEngine, engines: { quick: "Gemini Live — 말하자마자 글로", chirp: "Chirp 3 — 더 정확, 15~25초 늦게", both: "둘 다" } }),
+    live_engine_get: () => ({ ok: true, engine: liveEngine, choices: { quick: "Gemini Live — 말하자마자 글로(무료 Gemini 키, 소음에 약함)", chirp: "Chirp 3 — 더 정확, 15~25초 늦게 나옴(Google Cloud 로그인, 월 60분 무료 뒤 유료)", both: "둘 다 — 빠른 줄을 먼저 보이고 Chirp 줄로 확정" } }),
     live_engine_set: (v) => { liveEngine = v; return { ok: true }; },
     side_view: () => ({ ok: true, note: "체험판: 앱에서는 창이 화면 오른쪽 1/3로 붙어요" }),
   };
   function answer(name, args) {
     if (name in LIVE) return LIVE[name](...args);
+    if (name === "setup_info") {  // ?setup=1 shows the first-run wizard (optional tools listed: the note engines the public build offers)
+      const v = clone(CALLS["setup_info[]"] || {}); v.needs_setup = SETUP; v.trial = !SETUP;
+      if (v.tools) delete v.tools.claude;
+      return v;
+    }
+    if (name === "setup_apply") return { ok: true };
+    if (name === "etl_courses") {  // synthetic eTL course list (eTL gives names only, no class times)
+      if (!String(args[1] || "").trim() && !conn.etl) return { ok: false, error: "eTL 액세스 토큰을 붙여 넣으세요 (체험판: 아무 글자 8자 이상)" };
+      if (String(args[1] || "").trim()) conn.etl = true;
+      return { ok: true, courses: ["유체역학 체험", "공학수학 체험", "과학과 글쓰기 체험"], term: "2026-2", saved: !!String(args[1] || "").trim() };
+    }
+    if (name === "folder_layout_get" && args[0]) {  // the tree with the term and course names typed in the wizard
+      const v = clone(byName.folder_layout_get), names = (args[1] || []).length ? args[1] : ["과목 이름"];
+      for (const k of Object.keys(v.previews || {})) v.previews[k] = [].concat(...v.previews[k].map((line, i) => i === 0 ? [args[0] + "\\"] : line.includes("과목 이름") ? names.map((n) => line.replace("과목 이름", n)) : [line]));
+      return v;
+    }
+    if (name === "setup_close") { location.href = location.pathname; return { ok: true }; }
     if (name === "init") {
       const v = clone(CALLS["init[]"]);
       v.trial = false;  // the web bar replaces the app's "내 학기 폴더 정하기" bar
+      v.needs_setup = SETUP;
       v.labs = Object.assign({}, v.labs, { gsr: true });  // the study-room booking (a labs feature) is on to try
       v.config_error = null;  // recorded before the trial wrote recorder.toml (fixed in the app)
       v.features = Object.assign({}, v.features, { captions: { state: "ready" } });
