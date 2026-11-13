@@ -45,8 +45,8 @@
     <button class="rb" id="sideBtn" title="강의 목록 열기/닫기"><svg><use href="#i-folder"/></svg><span>강의</span></button>
     <button class="rb" id="searchBtn" title="전사·자료·노트 검색 (Ctrl K)"><svg><use href="#i-search"/></svg><span>검색</span></button>
     <button class="rb" id="examBtn" title="정리본 모음 — 과목별로 회차마다 만든 정리본을 모아 봅니다(시험 대비도 이 안에서)"><svg><use href="#i-exam"/></svg><span>정리본</span></button>
-    <button class="rb" id="roomBtn" title="그스룸 예약 — 관정관 4층 6인실 (정기 예약은 창 안에서)"><svg><use href="#i-door"/></svg><span>그스룸</span></button>
-    <button class="rb" id="memBtn" title="독일어 암기장 — 휴대폰과 진도가 이어지는 claude.ai 암기장을 창으로 엽니다"><svg><use href="#i-cards"/></svg><span>암기장</span></button>
+    <button class="rb" id="roomBtn" title="그스룸 예약 — 관정관 그룹스터디룸"><svg><use href="#i-door"/></svg><span>그스룸</span></button>
+    <button class="rb" id="memBtn" title="암기장 — 휴대폰과 진도가 이어지는 claude.ai 암기장을 창으로 엽니다"><svg><use href="#i-cards"/></svg><span>암기장</span></button>
     <button class="rb" id="inboxBtn" title="확인함 — 앱이 확신하지 못한 것"><svg><use href="#i-check"/></svg><span>확인</span><i class="badge num" id="inboxBadge" hidden></i></button>
     <span class="grow"></span>
     <button class="rb" id="importBtn" title="녹음 가져오기 — 휴대폰 등 앱 밖에서 녹음한 파일(창에 끌어다 놓아도 됩니다)"><svg><use href="#i-import"/></svg><span>가져오기</span></button>
@@ -62,6 +62,7 @@
     <div class="right">
       <button class="exam-chip" id="examChip" hidden></button>
       <button class="cap-chip" id="qaBtn" title="발표 질의응답 도우미 — 자료와 실시간 자막으로 Claude가 답할 거리를 줌">질의응답</button>
+      <button class="cap-chip" id="sideViewBtn" title="옆으로 보기 — 창을 화면 오른쪽 1/3로 줄여 실시간 전사와 전사만 봅니다. 왼쪽에는 PDF·크롬을 띄우세요">옆으로 보기</button>
       <button class="cap-chip" id="capBtn" title="실시간 자막 — 말하는 것을 바로 글로(Google)">자막</button>
       <div class="status-chip" title="녹음을 글로 바꾸는 서비스의 남은 양 — 누르면 자세히" id="engines" role="button" tabindex="0"><span><i class="dot"></i>전사</span></div>
     </div>
@@ -166,6 +167,12 @@
 <button class="fixbtn" id="fixBtn" hidden>고치기</button>
 <div class="notice-bar" id="noticeBar" hidden></div>
 <div class="toast" id="toast" role="status" aria-live="polite"></div>
+<!-- 옆으로 보기 (2026-11-14): the window on the right third of the screen, live transcript above, a transcript below -->
+<div class="sideview" id="sideView" hidden>
+  <header class="sv-top"><b>옆으로 보기</b><span class="grow"></span><button class="recmini" id="svRec"><i class="dot"></i><span id="svRecText">녹음 시작</span></button><button class="ghost" id="svBack" title="원래 창으로">원래대로</button></header>
+  <section class="sv-sec sv-live"><div class="sv-h"><b>실시간 전사</b><small id="svLiveInfo"></small><span class="grow"></span><button class="ghost" id="svLiveBtn">켜기</button></div><div class="sv-body body-scroll" id="svLive"></div></section>
+  <section class="sv-sec sv-tr"><div class="sv-h"><select id="svCourse" aria-label="과목"></select><select id="svLec" aria-label="회차"></select></div><div class="sv-body body-scroll" id="svTr"></div></section>
+</div>
 <script src="demo-bridge.js"></script>
 <script src="app.js"></script>
 </body>

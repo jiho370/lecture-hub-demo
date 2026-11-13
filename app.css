@@ -1006,3 +1006,56 @@ body:has(.qa-panel.with-deck) .cap-panel{display:none}
 .scrim.setup .trial-offer { margin-top: 14px; padding: 10px 12px; border: 1px dashed var(--line); border-radius: 10px; background: var(--accent-soft); }
 .scrim.setup .trial-offer p { margin: 0 0 8px; }
 .trial-bar { display: flex; flex-wrap: wrap; gap: 8px 12px; align-items: center; justify-content: space-between; padding: 6px 16px; background: var(--accent-soft); border-bottom: 1px solid var(--line); font-size: 13px; }
+
+
+.cmsg.ok { color: var(--accent); opacity: 1; }
+.cmsg.bad { color: var(--rec); opacity: 1; font-weight: 600; }
+.cmsg.warn { color: var(--warn); opacity: 1; }
+/* 그스룸 함께 쓰는 사람: 이름 | 연도 - 뒷자리 (2026-11-14) */
+.room-mates { margin: 8px 0 4px; }
+.mates { display: grid; gap: 6px; margin: 6px 0 4px; }
+.mate { display: grid; grid-template-columns: auto 4.4em auto 5.4em 32px; justify-content: start; align-items: center; gap: 6px; }
+.mate input.ask, .dialog .mate input.ask { width: 100%; min-width: 0; max-width: 12em; margin: 0; box-sizing: border-box; border: 1px solid var(--line); border-radius: 8px; padding: 6px 8px; background: var(--panel-2); color: var(--ink); font: inherit; font-size: 13.5px; }
+.mate .m-y, .mate .m-n { font-variant-numeric: tabular-nums; text-align: center; }
+.mate .m-dash { color: var(--sub); }
+.mate .m-del, .mate .ibtn.m-del { width: 32px; height: 32px; min-width: 32px; min-height: 32px; border-radius: 8px; }
+.m-add { margin: 2px 0 6px; }
+.gsrc { display: grid; gap: 6px; padding: 10px 12px; border: 1px solid var(--line); border-radius: 10px; margin: 6px 0; }
+.gsrc > small { color: var(--sub); line-height: 1.45; }
+.gsr-rooms { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 14px; }
+.gsr-rooms label { display: inline-flex; align-items: center; gap: 6px; white-space: nowrap; }
+.gsr-rooms input.ask, .dialog .gsr-rooms input.ask { width: 9em; margin: 0; }
+.gsr-rooms input.ask.short, .dialog .gsr-rooms input.ask.short { width: 5em; }
+.gsr-rooms select { font: inherit; color: var(--ink); background: var(--panel-2); border: 1px solid var(--line); border-radius: 6px; padding: 5px; }
+/* layout audit 2026-11-14: short labels never break in two, rows keep their columns */
+.pill, .num { white-space: nowrap; }
+.scrim.setup table.tools td:first-child { white-space: nowrap; }
+.scrim.setup table.tools td:nth-child(2) { white-space: nowrap; width: 1%; }
+.scrim.setup .labs .dlg-check { margin: 0; }
+.hq-top .num { flex: none; }
+.hq-dots { flex: 1; min-width: 0; }
+#impRecent .srow.clova { grid-template-columns: 86px minmax(0, 1fr) auto; }
+#impRecent .srow.clova > .nsub { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.td .what small { overflow: hidden; text-overflow: ellipsis; }
+/* 옆으로 보기 (2026-11-14): the whole window while the app sits on the right third of the screen */
+.sideview { position: fixed; inset: 0; z-index: 29; background: var(--bg); display: flex; flex-direction: column; }
+.sideview[hidden] { display: none; }
+.sv-top { display: flex; align-items: center; gap: 8px; padding: 10px 12px; border-bottom: 1px solid var(--line); background: var(--panel); }
+.sv-top b { white-space: nowrap; }
+.sv-sec { display: flex; flex-direction: column; min-height: 0; border-bottom: 1px solid var(--line); }
+.sv-live { flex: 1 1 45%; }
+.sv-tr { flex: 1 1 55%; }
+.sideview.no-live .sv-live { display: none; }
+.sv-h { display: flex; align-items: center; gap: 8px; padding: 8px 12px; flex-wrap: wrap; }
+.sv-h b { white-space: nowrap; }
+.sv-h small { color: var(--sub); }
+.sv-h select { flex: 1 1 120px; min-width: 0; font: inherit; color: var(--ink); background: var(--panel-2); border: 1px solid var(--line); border-radius: 8px; padding: 5px 6px; }
+.sv-body { flex: 1; min-height: 0; overflow: auto; padding: 4px 14px 12px; }
+.sv-body .empty { padding: 18px 4px; color: var(--sub); }
+.sv-seg { margin: 0 0 8px; line-height: 1.6; overflow-wrap: anywhere; }
+.sv-seg small { color: var(--faint); margin-right: 6px; }
+.recmini { display: inline-flex; align-items: center; gap: 6px; border: 1px solid var(--line); border-radius: 999px; padding: 5px 12px; white-space: nowrap; }
+.recmini.on { color: var(--rec); border-color: var(--rec); font-weight: 600; }
+.recmini.on .dot { background: var(--rec); }
+
+.mate input.m-name, .dialog .mate input.m-name { width: 4.6em; text-align: center; }

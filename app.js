@@ -260,7 +260,7 @@
   const ENGINES_ALL = [["gemini_transcribe", "google", "Google"], ["whisper", "whisper", "Whisper"], ["mai", "mai", "MAI"]];
   const enginesNow = () => ENGINES_ALL.filter((e) => e[1] !== "mai" || ed("mai"));
   // speech language per recording (2026-10-19: a German video sent as Korean came back as two lines)
-  const LANGS = { ko: "한국어", de: "독일어", en: "영어", ja: "일본어", zh: "중국어", fr: "프랑스어", es: "스페인어", auto: "자동(Whisper)" };
+  const LANGS = { ko: "한국어", de: "독어", en: "영어", ja: "일본어", zh: "중국어", fr: "프랑스어", es: "스페인어", auto: "자동(Whisper)" };
   const engLang = {};  // recording path → picked language, kept across the panel's re-renders
   async function renderLectureEngines() {
     const L = ui.view === "lecture" && ui.lecture, box = $("lvEngines");
@@ -374,7 +374,7 @@
     renderCaptions(s);
     const running = !!(s && s.running);
     clearTimeout(cap.timer);
-    cap.timer = setTimeout(pollCaptions, running || cap.shown ? 700 : 15000);  // idle: only notices captions started elsewhere
+    cap.timer = setTimeout(pollCaptions, running || cap.shown || sv.on ? 700 : 15000);  // idle: only notices captions started elsewhere
   }
   /* ---------- live transcription in the middle pane while recording (2026-11-13, replaces the slide pane).
      Gemini Live only, started with the recording when the Gemini key is connected and the course said yes;
@@ -400,7 +400,8 @@
       consent = await dialog({ title: "실시간 전사를 켤까요?", body: `${check.notice}\n과목이 정해지지 않아 이번에만 적용합니다(저장하지 않음).`, ok: "켜기", cancel: "켜지 않기" });
       if (!consent) return false;
     }
-    const r = await api.captions_start(course, liveSource(), consent, token, false, true);
+    const eng = ((await api.live_engine_get()) || {}).engine || "quick";  // settings: Gemini Live, Chirp 3 or both
+    const r = await api.captions_start(course, liveSource(), consent, token, eng !== "quick", eng !== "chirp");
     if (!r.ok) { cap.error = r.reason || "실시간 전사를 켜지 못했습니다"; renderLive(); if (!auto) toast(cap.error); return false; }
     cap.error = ""; cap.auto = !!auto || ["starting", "recording"].includes((ui.state || {}).phase); cap.recPaused = undefined; cap.last = ""; cap.liveHtml = "";
     if (!auto) store.set(LIVE_DECLINED, (store.get(LIVE_DECLINED, []) || []).filter((c) => c !== course));
@@ -435,6 +436,7 @@
     }
   }
   function renderLive() {
+    renderSideLive();
     const head = $("liveHead"), body = $("liveBody");
     if (!head || ui.view === "lecture" || ui.view === "home") return;
     const s = cap.status || {}, st = ui.state || {}, recording = ["starting", "recording", "stopping"].includes(st.phase);
@@ -460,7 +462,7 @@
     } else if (recording) {
       line = `<i class="dot wait"></i>실시간 전사를 켜는 중…`;
     } else {
-      line = `<i class="dot"></i>녹음을 시작하면 수업에서 하는 말이 여기에 바로 글로 나옵니다(Google Gemini Live).`;
+      line = `<i class="dot"></i>녹음을 시작하면 수업에서 하는 말이 여기에 바로 글로 나옵니다(엔진은 설정 › AI 엔진 › 실시간 전사).`;
       acts = `<label class="live-auto"><input type="checkbox" data-live="auto"${liveWanted() ? " checked" : ""}> 녹음과 함께 켜기</label>`;
     }
     const headHtml = `<div class="live-line">${line}</div><div class="live-acts">${acts}</div>`;
@@ -483,6 +485,65 @@
     else if (act === "stop") { cap.auto = false; await api.captions_stop(); toast("마지막 조각까지 적고 끕니다"); pollCaptions(); }
     else if (act === "pause") { const r = await api.captions_pause(!cap.paused); if (!r.ok) toast(r.reason); pollCaptions(); }
     else if (act === "file") { if (cap.status && cap.status.file) api.open_folder(cap.status.file.replace(/[\\/][^\\/]*$/, "")); }
+  }
+
+  /* ---------- 옆으로 보기 (user 2026-11-14): the window on the right third of the screen (PDF·Chrome on the left);
+     live transcript above, any lecture's transcript below (chosen by course and date) ---------- */
+  const sv = { on: false, course: "", lec: "", timer: null, liveHtml: "" };
+  async function sideView(on) {
+    const r = await api.side_view(on);
+    if (!r.ok) { toast(r.error || "창을 옮기지 못했습니다"); return; }
+    sv.on = on; $("sideView").hidden = !on; document.body.classList.toggle("sv-on", on);
+    clearInterval(sv.timer);
+    if (!on) return;
+    sv.liveHtml = ""; svFill(); renderSideLive(); svRecSync();
+    sv.timer = setInterval(svRecSync, 1000);
+    pollCaptions();
+  }
+  function svRecSync() {
+    const st = ui.state || {}, live = ["starting", "recording", "stopping"].includes(st.phase), b = $("svRec");
+    b.classList.toggle("on", live); b.disabled = $("recBtn").disabled;
+    $("svRecText").textContent = live ? `녹음 중 ${$("timer").textContent}` : st.phase === "finalizing" ? "저장 중…" : "녹음 시작";
+  }
+  function svItems() {
+    const by = {};
+    ((ui.side && ui.side.groups) || []).forEach((g) => g.items.forEach((it) => { (by[it.course] = by[it.course] || []).push(it); }));
+    Object.values(by).forEach((list) => list.sort((a, b) => b.date.localeCompare(a.date) || b.n - a.n));
+    return by;
+  }
+  function svFill() {
+    const by = svItems(), names = Object.keys(by), cc = capCourse();
+    if (!by[sv.course]) sv.course = (ui.lecture && by[ui.lecture.course] && ui.lecture.course) || (by[cc] && cc) || names[0] || "";
+    $("svCourse").innerHTML = names.map((n) => `<option${n === sv.course ? " selected" : ""}>${esc(n)}</option>`).join("") || "<option>회차 없음</option>";
+    const items = by[sv.course] || [];
+    if (!items.some((it) => it.id === sv.lec)) sv.lec = ui.lecture && items.some((it) => it.id === ui.lecture.id) ? ui.lecture.id : (items[0] || {}).id || "";
+    $("svLec").innerHTML = items.map((it) => `<option value="${it.id}"${it.id === sv.lec ? " selected" : ""}>${esc(mdText(it.date))} ${esc(it.label)}</option>`).join("");
+    svLoad();
+  }
+  async function svLoad() {
+    const box = $("svTr"), id = sv.lec;
+    if (!id) { box.innerHTML = `<div class="empty">회차를 고르세요</div>`; return; }
+    box.innerHTML = `<div class="empty">불러오는 중…</div>`;
+    const r = await api.lecture(id);
+    if (id !== sv.lec) return;
+    if (!r.ok) { box.innerHTML = `<div class="empty">${esc(r.error || "회차를 열 수 없습니다")}</div>`; return; }
+    const segs = r.lecture.segments || [];
+    box.innerHTML = segs.length ? segs.map((g) => `<p class="sv-seg"><small class="num">${clock(g.start_ms)}</small>${g.speaker ? `<b>${esc(g.speaker)}</b> ` : ""}${esc(g.text)}</p>`).join("")
+      : `<div class="empty">이 회차는 아직 전사가 없습니다</div>`;
+    box.scrollTop = 0;
+  }
+  function renderSideLive() {
+    if (!sv.on) return;
+    const s = cap.status || {}, running = !!s.running;
+    $("svLiveInfo").textContent = running ? `${({ finishing: "마무리 중", paused: "일시중단" })[s.state] || "듣는 중"} · ${clock((s.elapsed_s || 0) * 1000)}` : liveReady() ? "꺼짐" : "Gemini 키를 연결하면 켤 수 있습니다";
+    const b = $("svLiveBtn");
+    b.textContent = running ? "끄기" : "켜기"; b.disabled = s.state === "finishing" || (!running && !liveReady());
+    const html = (s.lines || []).map((l) => `<p class="cap-line"><small>${clock(l.at * 1000)}</small>${esc(l.text)}</p>`).join("") + (running && s.interim ? `<p class="cap-interim">${esc(s.interim)}</p>` : "");
+    if (html === sv.liveHtml) return;
+    const body = $("svLive"), atBottom = body.scrollHeight - body.scrollTop - body.clientHeight < 40;
+    body.innerHTML = html || `<div class="empty">${running ? "듣는 중… 첫 줄은 몇 초 뒤에 나옵니다" : "켜면 수업에서 하는 말이 여기에 바로 글로 나옵니다"}</div>`;
+    sv.liveHtml = html;
+    if (atBottom) body.scrollTop = body.scrollHeight;
   }
 
   async function onCaptions() {
@@ -1436,7 +1497,7 @@
       const taken = new Set(imp.items.map((x) => x.path));
       const when = (ms) => { const d = new Date(ms); return `${d.getMonth() + 1}/${d.getDate()} ${String(d.getHours()).padStart(2, "0")}:${String(d.getMinutes()).padStart(2, "0")}`; };
       const C = R.clova, cw = C && C.checked_at ? C.checked_at.slice(5, 16).replace("-", "/").replace("T", " ") : "";
-      const clova = `<div class="srow clova${C && C.login_required ? " warn" : ""}"><span>클로바노트</span><span class="nsub">${imp.clovaBusy ? "확인하는 중… (1~2분)" : C ? `${esc(cw)} · ${esc(C.message)}` : "아직 확인하지 않음"}</span>` +
+      const clova = `<div class="srow clova${C && C.login_required ? " warn" : ""}"><span>클로바노트</span><span class="nsub"${C && C.message ? ` title="${esc(C.message)}"` : ""}>${imp.clovaBusy ? "확인하는 중… (1~2분)" : C ? `${esc(cw)} · ${esc(C.message)}` : "아직 확인하지 않음"}</span>` +
         (imp.clovaBusy ? "" : `<span class="link" id="impClova" title="Aside 브라우저로 클로바노트의 새 노트(녹음+전사)를 다운로드 폴더에 받습니다. 받은 노트는 다시 받지 않습니다. 앱이 열려 있으면 일주일마다(실패하면 하루 뒤) 저절로 확인합니다">확인</span>`) + `</div>`;
       rec.innerHTML = clova + `<div class="sl">최근 받은 파일 <small>${R.folders.map((f) => esc(f.split("\\").pop())).join(" · ") || "받은 파일 폴더를 찾지 못함"}</small></div>` +
         (R.items.length ? R.items.map((f) => `<div class="srow${f.imported ? " discarded" : ""}"><span class="num">${when(f.mtime_ms)}</span><span>${esc(f.folder === "Downloads" ? "다운로드" : "카카오톡")}</span><span title="${esc(f.path)}">${esc(f.name)} <small class="nsub">${mb(f.bytes)}</small></span>` +
@@ -1741,7 +1802,7 @@
 
   /* A note is untrusted HTML (security review 2026-11-05): the frame is sandboxed without allow-scripts, and this
      policy goes first so nothing in the note can run scripts, fetch, embed plugins or change the base address. */
-  const NOTE_CSP = `<meta http-equiv="Content-Security-Policy" content="script-src 'none'; connect-src 'none'; object-src 'none'; base-uri 'none'; form-action 'none'">`;
+  const NOTE_CSP = `<meta http-equiv="Content-Security-Policy" content="script-src 'none'; connect-src 'none'; object-src 'none'; base-uri 'none'; form-action 'none'; img-src 'self' data:; font-src 'self' data:; media-src 'self' data:; style-src 'self' 'unsafe-inline'; frame-src 'none'">`;
   /* organized HTML note: full window by default, Esc shrinks (user 2026-09-29) */
   async function showHtml(note) {
     $("htmlFrame").dataset.path = note.path; $("htmlFloatName").textContent = note.path.split("\\").pop();
@@ -1967,7 +2028,7 @@
           `<div class="hint">이름에 '대비'·'시험'·'문제'가 든 HTML이 과목 폴더나 정리본에 없습니다.</div>`) + `</div>` +
         `<div class="exsec"><h5>수업 중 발언<small>전사에 실제로 있는 말만 — 누르면 그 대목으로 갑니다</small></h5>` + (c.cues.map((u) => `<div class="exrow cue" data-lecture="${u.lecture_id}" data-at="${u.at_ms}"><b class="num">${esc(mdText(u.date))} ${clock(u.at_ms)}</b><span class="b cue">${esc(u.kind_label)}</span><small>${esc(u.by_label)}</small><p>“${esc(u.quote)}”${u.note ? `\n${esc(u.note)}` : ""}</p></div>`).join("") ||
           `<div class="hint">전사에서 찾은 시험 관련 발언이 없습니다.</div>`) + `</div>`;
-      if (window.LHGerman) window.LHGerman.mountExam(box, c.folder, toast);  // 독일어 암기장 열기(german.js, P-037)
+      if (window.LHGerman) window.LHGerman.mountExam(box, c.folder, toast);  // 암기장 열기(german.js, P-037)
       const input = S.adding && box.querySelector("[data-page-target]"); if (input) input.focus();
     };
     const load = async () => {
@@ -2206,23 +2267,51 @@
     load();
   }
 
+  /* 그스룸 함께 쓰는 사람: 이름 | 학번 연도 - 나머지 칸 (user 2026-11-14). rows: [[이름, 연도, 나머지], ...] */
+  const nameWidth = (s) => `${Math.max(3, [...String(s || "")].length) + 1.6}em`;  // a 3-letter name fits; longer names widen the box
+  const mateRow = (m, i) => `<div class="mate" data-i="${i}"><input class="ask m-name" data-f="0" style="width:${nameWidth(m[0])}" value="${esc(m[0])}" placeholder="이름" maxlength="20" autocomplete="off" aria-label="이름"><input class="ask m-y" data-f="1" value="${esc(m[1])}" placeholder="2022" inputmode="numeric" autocomplete="off" aria-label="학번 앞 4자리(입학 연도)"><span class="m-dash">-</span><input class="ask m-n" data-f="2" value="${esc(m[2])}" placeholder="12345" maxlength="8" inputmode="numeric" autocomplete="off" aria-label="학번 뒤 자리"><button class="ibtn m-del" data-mdel="${i}" title="이 줄 지우기" aria-label="이 줄 지우기">✕</button></div>`;
+  const matesHtml = (rows) => `<div class="mates">${rows.map(mateRow).join("")}</div><button class="ghost m-add" data-madd="1">+ 사람 추가</button>`;
+  const matesText = (rows) => rows.filter((m) => m[0].trim() || m[1] || m[2]).map((m) => `${m[0].trim().replace(/\s+/g, " ") || "?"} ${m[1]}${m[2]}`).join("\n");
+  const matesFrom = (pairs) => { const out = (pairs || []).map(([n, no]) => [String(n), String(no).slice(0, 4), String(no).slice(4)]); while (out.length < 3) out.push(["", "", ""]); return out; };
+  // typing in a row: keeps rows in step; 4 digits of the year (or a pasted 'YYYY-NNNNN') moves on to the second box
+  const matesInput = (e, rows) => {
+    const inp = e.target.closest(".mate input"); if (!inp) return false;
+    const i = +inp.closest(".mate").dataset.i, f = +inp.dataset.f, row = rows[i]; if (!row) return true;
+    let v = inp.value;
+    if (f) { v = v.replace(/\D/g, ""); if (v !== inp.value) inp.value = v; } else inp.style.width = nameWidth(v);
+    if (f === 1 && v.length > 4) { const rest = inp.parentNode.querySelector(".m-n"); row[2] = rest.value = v.slice(4, 12); v = inp.value = v.slice(0, 4); rest.focus(); }
+    else if (f === 1 && v.length === 4 && e.inputType !== "deleteContentBackward") inp.parentNode.querySelector(".m-n").focus();
+    row[f] = v; return true;
+  };
+  const matesClick = (t, rows) => {
+    if (t.closest("[data-madd]")) { if (rows.length < 8) rows.push(["", "", ""]); return true; }
+    const del = t.closest("[data-mdel]"); if (!del) return false;
+    rows.splice(+del.dataset.mdel, 1); while (rows.length < 3) rows.push(["", "", ""]); return true;
+  };
+
   /* ---------- 그스룸 예약 (P-019): Aside(기본, D-069) 또는 Claude in Chrome이 예약·반납하고, 앱은 결과만 보여 준다 ---------- */
   function openRoom(only) {
     document.querySelectorAll(".room-scrim").forEach((s) => s.remove());
     const publicRooms = (ui.info.edition || {}).name === "public";
+    const prefs = !publicRooms && (ui.info.edition || {}).gsr_prefs !== false;  // full build: saved companions prefill the form
     const rulesOnly = only === "rules" && !publicRooms;  // 사이드바 정기 예약 버튼: 규칙·다음 시도·정기 예약 기록만
-    const st = { data: null, day: null, start: "15:00", hours: 3, use: "과제", room: "G405", rules: [], auto: true, dirty: false, lastJob: null, alts: null, notice: null, chat: [], thinking: false };
+    const st = { data: null, day: null, start: "15:00", hours: 3, use: "과제", room: "", mates: matesFrom([]), saved: [], rules: [], auto: true, dirty: false, lastJob: null, alts: null, notice: null, chat: [], thinking: false };
     const scrim = document.createElement("div");
     scrim.className = "scrim cal-scrim room-scrim";
     scrim.innerHTML = rulesOnly
       ? `<div class="cal-panel room-panel room-rules"><div class="cal-head"><b>그스룸 정기 예약</b><small class="room-sub">매주 같은 요일·시각에 자동 예약 (30분~12시간)</small><span class="grow"></span><button class="ghost" data-c="full">그스룸 창</button><button class="ibtn" data-c="close" title="닫기">✕</button></div><div class="room-job" id="roomJob" hidden></div><div class="room-main room-rules-body" id="roomMain"></div></div>`
-      : `<div class="cal-panel room-panel"><div class="cal-head"><b>그스룸 예약</b><small class="room-sub">관정관 4층 6인실 · ${publicRooms ? "최대 3시간 · 예약마다 확인" : "30분~12시간(3시간을 넘으면 이어서)"} · 신청인+동반 3명</small><span class="grow"></span>${publicRooms ? "" : `<button class="ghost" data-c="rules">정기 예약</button>`}<button class="ghost" data-c="refresh">예약 목록 확인</button><button class="ibtn" data-c="close" title="닫기">✕</button></div><div class="room-job" id="roomJob" hidden></div><div class="room-chat"><div class="room-chat-log" id="roomChatLog" hidden></div><div class="room-chat-in"><input id="rChat" autocomplete="off" maxlength="300" placeholder="${publicRooms ? "예: 내일 G405 2시부터 2시간 예약" : "말로 지시하세요 — 내일 2시부터 6시간 예약 · 수요일 거 취소"}"><button class="primary" data-c="chat" id="rChatGo">보내기</button></div></div><div class="cal-body"><div class="room-main" id="roomMain"></div><div class="cal-side" id="roomSide"></div></div></div>`;
+      : `<div class="cal-panel room-panel"><div class="cal-head"><b>그스룸 예약</b><small class="room-sub">관정관 4층 6인실 · ${publicRooms ? "최대 3시간 · 예약마다 확인" : "30분~12시간(3시간을 넘으면 이어서)"} · 신청인+동반 3명</small><span class="grow"></span>${publicRooms ? "" : `<button class="ghost" data-c="rules">정기 예약</button>`}<button class="ghost" data-c="refresh">예약 목록 확인</button><button class="ibtn" data-c="close" title="닫기">✕</button></div><div class="room-job" id="roomJob" hidden></div><div class="room-chat"><div class="room-chat-log" id="roomChatLog" hidden></div><div class="room-chat-in"><input id="rChat" autocomplete="off" maxlength="300" placeholder="${publicRooms ? "예: 내일 2시부터 2시간 예약" : "말로 지시하세요 — 내일 2시부터 6시간 예약 · 수요일 거 취소"}"><button class="primary" data-c="chat" id="rChatGo">보내기</button></div></div><div class="cal-body"><div class="room-main" id="roomMain"></div><div class="cal-side" id="roomSide"></div></div></div>`;
     document.body.appendChild(scrim); keepFocus(scrim);
     const main = scrim.querySelector("#roomMain"), side = scrim.querySelector("#roomSide"), banner = scrim.querySelector("#roomJob");
     let timer = null;
     const close = () => { clearTimeout(timer); scrim.remove(); document.removeEventListener("keydown", key); };
     const key = (e) => { if (e.key === "Escape" && isTop(scrim)) close(); };
     document.addEventListener("keydown", key);
+    if (prefs && !rulesOnly) api.gsr_companions_get().then((r) => {
+      if (!r.ok || !r.rows.length) return;
+      st.saved = r.rows;
+      if (!matesText(st.mates)) { st.mates = matesFrom(r.rows); if (st.data && main.querySelector(".room-mates")) draw(); }
+    });
     const hm = (t) => (t && t.length === 4 ? `${t.slice(0, 2)}:${t.slice(2)}` : t || "");
     const viaAside = () => ((st.data || {}).browser || "aside") === "aside";
     const browserName = () => (viaAside() ? "Aside" : "Chrome");
@@ -2231,16 +2320,18 @@
     const stamp = (iso) => { const d = new Date(iso); return isNaN(d) ? "" : `${d.getMonth() + 1}/${d.getDate()} ${String(d.getHours()).padStart(2, "0")}:${String(d.getMinutes()).padStart(2, "0")}`; };
     const hText = (h) => { const m = Math.round(h * 60); return m % 60 === 0 ? `${m / 60}시간` : m < 60 ? `${m}분` : `${Math.floor(m / 60)}시간 ${m % 60}분`; };
     const KIND = { book: "예약", return: "반납", cancel: "예약 취소", list: "확인", chat: "말로 지시" };
-    const BY = { app: "앱", "app-auto": "앱 자동반납", task: "Claude 예약 작업" };
+    const BY = { app: "앱", "app-auto": "앱 자동반납", task: "예약 작업" };
     const WD = "월화수목금토일", wd = (d) => WD[(d.getDay() + 6) % 7];
     const md = (d) => `${d.getMonth() + 1}/${d.getDate()}(${wd(d)})`;
-    // Claude 예약 작업은 매일 00:05·09:05에 '오늘+3일'을 본다 → 이 규칙이 다음에 예약을 시도하는 때
+    // 정기 예약은 앱 밖의 예약 작업(스케줄러)이 하루 두 번 '오늘+3일'을 보고 건다. TRY = 그 작업의 실행 시각(작업 설정과 맞춘다)
+    const TRY = [[0, 5], [9, 5]];
+    const tryText = (h, m) => `${String(h).padStart(2, "0")}:${String(m).padStart(2, "0")}`;
     const nextTry = (rule) => {
       const now = new Date();
       for (let k = 0; k < 15; k++) {
         const day = new Date(now.getFullYear(), now.getMonth(), now.getDate() + k);
         if (wd(day) !== rule.weekday) continue;
-        for (const [h, m] of [[0, 5], [9, 5]]) {
+        for (const [h, m] of TRY) {
           const at = new Date(day.getFullYear(), day.getMonth(), day.getDate() - 3, h, m);
           if (at > now) return { day, at };
         }
@@ -2324,12 +2415,12 @@
         const plan = (st.dirty ? r.rules : st.rules).map((x) => {
           if (!x.enabled) return `<div class="room-next off"><b>${esc(x.weekday)} ${esc(x.start)}~${plus3h(x.start, x.hours || 3)}</b><small>꺼짐</small></div>`;
           const n = nextTry(x);
-          return n ? `<div class="room-next"><b>${md(n.day)} ${esc(x.start)}~${plus3h(x.start, x.hours || 3)}</b> ${esc(x.use)}<small>${md(n.at)} ${String(n.at.getHours()).padStart(2, "0")}:05에 예약 시도 (실패하면 그날 09:05에 한 번 더)</small></div>` : "";
+          return n ? `<div class="room-next"><b>${md(n.day)} ${esc(x.start)}~${plus3h(x.start, x.hours || 3)}</b> ${esc(x.use)}<small>${md(n.at)} ${tryText(n.at.getHours(), n.at.getMinutes())}에 예약 시도${TRY.length > 1 ? ` (실패하면 그날 ${tryText(...TRY[TRY.length - 1])}에 한 번 더)` : ""}</small></div>` : "";
         }).join("") || `<div class="hint">켜진 규칙이 없습니다.</div>`;
         const books = r.log.filter((e) => e.kind === "book");
         main.innerHTML = `<div class="sl">규칙</div>${ruleRows(true)}${ruleActs}
           <div class="sl">다음 예약 시도${st.dirty ? " <small>(저장된 규칙 기준)</small>" : ""}</div>${plan}
-          <div class="hint">Claude 데스크톱 예약 작업이 매일 00:05·09:05에 3일 뒤 날짜를 봅니다. Claude 앱이 켜져 있어야 하고, 그날 이미 예약이 있으면 건너뜁니다. 3시간을 넘으면 3시간 블록을 이어서 잡고, 블록마다 끝나기 5분 전 자동반납을 걸어 둡니다.</div>
+          <div class="hint">따로 설정한 예약 작업이 매일 ${TRY.map((t) => tryText(...t)).join("·")}에 3일 뒤 날짜를 봅니다. 작업을 돌리는 프로그램이 켜져 있어야 하고, 그날 이미 예약이 있으면 건너뜁니다. 3시간을 넘으면 3시간 블록을 이어서 잡고, 블록마다 끝나기 5분 전 자동반납을 걸어 둡니다.</div>
           <div class="sl">예약 기록</div>${books.map(logRow).join("") || `<div class="hint">아직 예약 기록이 없습니다.</div>`}`;
         return;
       }
@@ -2339,8 +2430,8 @@
       const alts = st.alts && st.alts.length ? `<div class="sl">${r.public ? st.hours : 3}시간 가능한 다른 시각 — 누르면 예약 확인</div><div class="chips">${st.alts.map((a) => `<button class="chipbtn" data-alt-room="${esc(a.room)}" data-alt-start="${hm(a.start)}"${dis}>${esc(a.room)} · ${hm(a.start)}~${hm(a.end)}</button>`).join("")}</div>` : "";
       const seen = r.updated_at ? `마지막 확인 ${stamp(r.updated_at)}${r.updated_by ? " · " + (BY[r.updated_by] || r.updated_by) : ""}` : "아직 확인 안 함 — 위 [예약 목록 확인]";
       main.innerHTML = `<div class="sl">날짜 (3일 뒤까지)</div><div class="chips">${days}</div>
-        <div class="room-form">${r.public ? `<label>방<input id="rRoom" value="${esc(st.room)}" maxlength="4" placeholder="G405" style="width:76px"></label>` : ""}<label>시작<select id="rStart">${opt(r.starts, st.start)}</select></label><label>길이<select id="rHours">${hopt(st.hours)}</select></label><span class="room-end">~ ${plus3h(st.start, st.hours)}</span><label>용도<select id="rUse">${opt(r.uses, st.use)}</select></label><button class="primary" data-c="book"${dis}>${hText(st.hours)} 예약</button></div>
-        <div class="hint">방은 4층 → 끝난 뒤에도 비는 방 → 모니터 방 → 복도 가운데 순으로 잡습니다(양끝 G404·G405는 맨 뒤). 3시간을 넘으면 3시간 블록으로 이어서 예약합니다(같은 방 우선, 모든 블록에 빈 방이 있을 때만). 원하는 길이가 안 되면 가장 길게 되는 만큼만 잡습니다.${r.site_hours ? ` 사이트 운영 시각 ${esc(r.site_hours.open)}~${esc(r.site_hours.close)}.` : " 시작 시각은 사이트 운영 시각을 읽으면([예약 목록 확인]) 그 범위로 좁혀집니다."}</div>
+        <div class="room-form">${r.public ? `<label>방<input id="rRoom" value="${esc(st.room)}" maxlength="4" placeholder="방 번호" style="width:76px"></label>` : ""}<label>시작<select id="rStart">${opt(r.starts, st.start)}</select></label><label>길이<select id="rHours">${hopt(st.hours)}</select></label><span class="room-end">~ ${plus3h(st.start, st.hours)}</span><label>용도<select id="rUse">${opt(r.uses, st.use)}</select></label><button class="primary" data-c="book"${dis}>${hText(st.hours)} 예약</button></div>
+        <div class="room-mates"><div class="sl">함께 쓰는 사람 <small>나를 빼고 3명 이상 · 학번은 앞 4자리와 뒷자리를 나눠 적습니다 · ${prefs ? "설정에 저장한 사람이 미리 채워집니다. 여기서 바꾸면 이번 예약에만 씁니다" : "이번 예약에만 쓰고 저장하지 않습니다"}</small></div>${matesHtml(st.mates)}</div>
         <div class="sl">시간표 공강 추천 — 누르면 위에 채워짐</div><div class="chips">${sug}</div>${alts}
         <div class="sl">내 예약 <small>${esc(seen)}</small></div>${r.active.map((b) => row(b, dis)).join("") || `<div class="hint">다가오는 예약이 없습니다.</div>`}
         ${r.past.length ? `<div class="sl">지난 예약</div>${r.past.map((b) => row(b, dis)).join("")}` : ""}`;
@@ -2350,11 +2441,13 @@
         <div class="sl">최근 기록</div>${log}
         <div class="src">${viaAside() ? "예약·반납은 Aside 브라우저가 합니다(AI 없이 정해진 순서대로, 로그인은 Aside 비밀번호 관리자가 채움)" : "예약·반납은 Claude가 사용자 Chrome(저장된 SNU 로그인)에서 합니다"}. 앱은 비밀번호를 다루지 않습니다.</div>`;
     };
-    const start = async (call) => {
+    const start = async (call, booking = false) => {
       const r = await call;
       if (!r.ok) { toast(r.error || "시작하지 못했습니다"); return; }
+      if (booking) st.mates = matesFrom(st.saved);  // typed for each booking (full build: back to the saved list)
       st.notice = null; st.lastJob = "running"; load();
     };
+    scrim.addEventListener("input", (e) => { matesInput(e, st.mates); });
     scrim.addEventListener("keydown", (e) => { if (e.target.id === "rChat" && e.key === "Enter" && !e.isComposing) { e.preventDefault(); sendChat(); } });
     scrim.addEventListener("change", (e) => {
       const t = e.target;
@@ -2367,6 +2460,7 @@
     });
     scrim.addEventListener("click", async (e) => {
       if (e.target === scrim) { close(); return; }
+      if (matesClick(e.target, st.mates)) return draw();
       const t = e.target.closest("[data-c],[data-day],[data-sday],[data-alt-room],[data-ret],[data-cancel],[data-rdel],[data-chat-do],[data-chat-no]"); if (!t || t.disabled) return;
       const c = t.dataset.c;
       if (c === "close") return close();
@@ -2381,7 +2475,7 @@
         if (!r.ok) toast(r.error || "중지하지 못했습니다");
         return load();
       }
-      if (c === "book") return start(api.room_book(st.day, st.start, st.use, publicRooms ? st.room : null, st.hours));
+      if (c === "book") return start(api.room_book(st.day, st.start, st.use, publicRooms ? st.room : null, st.hours, matesText(st.mates)), true);
       if (c === "radd") { st.rules.push({ weekday: "월", start: "15:00", use: "과제", hours: 3, enabled: true }); st.dirty = true; return draw(); }
       if (c === "rsave") {
         const r = await api.room_rules(st.rules, st.auto);
@@ -2390,7 +2484,7 @@
       }
       if (t.dataset.day) { st.day = t.dataset.day; st.alts = null; return draw(); }
       if (t.dataset.sday) { st.day = t.dataset.sday; st.start = t.dataset.sstart; st.alts = null; return draw(); }
-      if (t.dataset.altRoom) return start(api.room_book(st.day, t.dataset.altStart, st.use, t.dataset.altRoom, publicRooms ? st.hours : 3));
+      if (t.dataset.altRoom) return start(api.room_book(st.day, t.dataset.altStart, st.use, t.dataset.altRoom, publicRooms ? st.hours : 3, matesText(st.mates)), true);
       if (t.dataset.ret) {
         const ok = await dialog({ title: `${t.dataset.seat} 반납`, body: "지금 반납하면 이 예약이 끝납니다. 방에서 나왔을 때만 누르세요.", ok: "반납", tone: "danger" });
         if (ok) start(api.room_return(t.dataset.ret));
@@ -2406,8 +2500,9 @@
         const m = st.chat[st.chat.length - 1];
         if (!m || !m.confirm) return;
         const go = m.confirm; m.confirm = null; drawChat();
-        const r = await api.room_chat_confirm(go.intent, go.ids, go.booking || null);
-        if (!r.ok) { st.chat.push({ who: "bot", text: r.error || "실행하지 못했습니다" }); return drawChat(); }
+        const r = await api.room_chat_confirm(go.intent, go.ids, go.booking || null, go.intent === "book" ? matesText(st.mates) : "");
+        if (!r.ok) { if (go.intent === "book") m.confirm = go; st.chat.push({ who: "bot", text: r.error || "실행하지 못했습니다" }); return drawChat(); }
+        if (go.intent === "book") { st.mates = matesFrom(st.saved); draw(); }
         st.chat.push({ who: "bot", text: go.intent === "book" ? "예약을 시작합니다." : go.intent === "cancel" ? "취소를 시작합니다. 1분쯤 걸립니다." : "반납을 시작합니다." }); drawChat();
         st.notice = null; st.lastJob = "running"; return load();
       }
@@ -2711,9 +2806,15 @@
     $("htmlFrame").addEventListener("load", noteFrameLoaded);
     $("htmlOpen").onclick = async () => { const n = ui.htmlPages && ui.htmlPages[+$("htmlSel").value || 0]; if (n) { const r = await api.open_path(n.path); if (!r.ok) toast(r.error); } };
     $("roomBtn").onclick = () => openRoom();
-    $("memBtn").onclick = () => { if (window.LHGerman) window.LHGerman.openFromRail($("memBtn"), toast, openExam); };  // 독일어 암기장 바로 열기(german.js)
+    $("memBtn").onclick = () => { if (window.LHGerman) window.LHGerman.openFromRail($("memBtn"), toast, openExam); };  // 암기장 바로 열기(german.js)
     $("examChip").onclick = () => openExam();
     $("capBtn").onclick = () => onCaptions();
+    $("sideViewBtn").onclick = () => sideView(true);
+    $("svBack").onclick = () => sideView(false);
+    $("svRec").onclick = () => $("recBtn").click();
+    $("svLiveBtn").onclick = async () => { if ((cap.status || {}).running) { cap.auto = false; await api.captions_stop(); } else await startLive(false); pollCaptions(); };
+    $("svCourse").onchange = (e) => { sv.course = e.target.value; sv.lec = ""; svFill(); };
+    $("svLec").onchange = (e) => { sv.lec = e.target.value; svLoad(); };
     pollCaptions();
     $("qaBtn").onclick = () => onQa();
     pollQa();
@@ -2967,7 +3068,8 @@
   const ed = (k) => !(ui.info && ui.info.edition && ui.info.edition[k] === false);  // public edition: no assignment / mai / qa
 
   function applyLabs() {
-    { const qa = $("qaBtn"); if (qa) qa.hidden = !ed("qa"); }
+    // the public edition has no 질의응답 and no 자막 buttons (user 2026-11-14); the owner's app keeps both
+    [["qaBtn", "qa"], ["capBtn", "captions"]].forEach(([id, k]) => { const el = $(id); if (el && !ed(k)) { el.hidden = true; el.style.display = "none"; } });
     const labs = (ui.info && ui.info.labs) || {}, feats = (ui.info && ui.info.features) || {};
     const rules = [["roomBtn", "gsr", "gsr"], ["memBtn", "memorizer", null]];
     rules.forEach(([id, lab, feat]) => {
@@ -3015,6 +3117,7 @@
     scrim.className = "scrim setup";
     document.body.appendChild(scrim); keepFocus(scrim, () => { scrim.remove(); loadEngines(); });
     let busy = "";
+    const note = {};  // per connection: the last result line, kept across redraws ({text, tone})
     async function load(login = false) {
       const s = await api.conn_status(login);
       s.permissions = await api.recording_permissions();
@@ -3022,10 +3125,20 @@
       s.ai = await api.ai_status(login);
       s.layout = await api.folder_layout_get();
       s.cleanup = await api.audio_cleanup_get();
+      s.live = await api.live_engine_get();
+      const gsrPrefs = s.labs.gsr && (ui.info.edition || {}).name !== "public";
+      if (gsrPrefs && !gsr) {  // the owner's 그스룸 list and room order (full build only), loaded once and kept while typing
+        const [c, r] = [await api.gsr_companions_get(), await api.gsr_rooms_get()];
+        if (c.ok && r.ok) gsr = { rows: matesFrom(c.rows), rooms: { ...r.rooms, avoid: r.rooms.avoid.join(" "), center: r.rooms.center == null ? "" : String(r.rooms.center), floor_first: r.rooms.floor_first ? String(r.rooms.floor_first) : "" }, msg: "", rmsg: "" };
+      }
+      s.gsr = gsrPrefs ? gsr : null;
       ui.ai = s.ai;
       if (ui.info && Array.isArray(s.features)) { ui.info.features = Object.fromEntries(s.features.map((f) => [f.id, f])); renderLive(); }
+      last = s;
       draw(s);
     }
+    let gsr = null;  // 그스룸 saved companions + room order being edited (full build)
+    let last = null;  // the whole screen state: a "checking…" redraw reuses it (conn_status alone lacks the AI/layout parts)
     function draw(s) {
       const old = scrim.querySelector(".dialog"), keep = old ? [old.scrollTop, scrim.scrollTop] : null;  // a redraw keeps the place
       const features = s.features.map((f) => { const [cls, txt] = FEATURE_BADGE[f.state]; return `<tr><td>${esc(f.label)}</td><td><span class="pill ${cls}">${txt}</span></td><td>${esc(f.hint)}</td></tr>`; }).join("");
@@ -3034,7 +3147,7 @@
         <div class="cn">${esc(k.steps)} ${esc(k.note)}</div>
         <div class="ca"><button data-a="connect" ${busy ? "disabled" : ""}>${k.connected ? "키 바꾸기" : "연결"}</button>
           ${k.connected ? `<button data-a="test" ${busy ? "disabled" : ""}>테스트</button><button class="ghost" data-a="remove">연결 끊기</button>` : ""}
-          <button class="ghost" data-a="help">키 받는 곳 ↗</button><span class="cmsg" id="cm-${esc(k.id)}">${busy === k.id ? "확인하는 중…" : ""}</span></div></div>`).join("");
+          <button class="ghost" data-a="help">키 받는 곳 ↗</button><span class="cmsg${note[k.id] ? " " + note[k.id].tone : ""}" id="cm-${esc(k.id)}">${busy === k.id ? "서비스에 확인하는 중… (몇 초)" : note[k.id] ? esc(note[k.id].text) : ""}</span></div></div>`).join("");
       const tools = s.tools.map((t) => `<tr><td>${esc(t.label)}</td><td>${t.found ? "✔ 있음" : t.required ? "✖ 필요" : "– 없음(선택)"}${t.signed_in === true ? " · 로그인됨" : t.signed_in === false ? " · 로그인 필요" : ""}</td>
         <td>${esc(t.needed_for)}${t.found ? "" : `<br><small>${esc(t.hint)}</small>`}</td><td>${t.help_url && !t.found ? `<button class="ghost" data-a="thelp" data-id="${esc(t.id)}">설치 안내 ↗</button>` : ""}</td></tr>`).join("");
       scrim.innerHTML = `<div class="dialog wide" role="dialog"><h4>설정 · 연결</h4>
@@ -3046,36 +3159,29 @@
         <h5>녹음 자동 정리</h5>${cleanupRow(s.cleanup)}
         <h5>AI 엔진</h5><p>전사·자료 글의 정리와 그스룸 지시 해석에 쓸 엔진입니다. 녹음 전사는 별도 Google/Groq 연결을 씁니다.</p>
         ${[["default", "기본"], ["notes", "정리본·HTML 도우미"], ["gsr_chat", "그스룸 지시 해석"]].map(([key,label]) => `<label class="permission-row">${label}<select data-ai-feature="${key}">${(key === "default" ? [] : [["inherit", "기본값 따름"]]).concat(Object.entries(s.ai.choices)).map(([k,v]) => `<option value="${k}"${(s.ai.settings[key] || (key === "default" ? "codex" : "inherit")) === k ? " selected" : ""}>${esc(v)}</option>`).join("")}</select></label>`).join("")}
-        <small>${s.ai.env_override ? "환경 변수로 엔진이 고정되어 있습니다. " : ""}${esc(s.ai.account_notice)}<br>Codex 로그인: ${s.ai.codex_signed_in === true ? "확인됨" : s.ai.codex_signed_in === false ? "로그인 필요" : "확인하지 않음 (프로그램 다시 찾기로 확인)"}</small>
+        ${s.ai.env_override ? `<small>환경 변수로 엔진이 고정되어 있습니다.</small>` : ""}
+        ${s.live ? `<label class="permission-row">실시간 전사<select data-live-engine>${Object.entries(s.live.choices).map(([k, v]) => `<option value="${k}"${s.live.engine === k ? " selected" : ""}>${esc(v)}</option>`).join("")}</select></label><small>다음에 실시간 전사를 켤 때부터 적용됩니다. Chirp 3은 Google Cloud CLI 로그인과 프로젝트가 필요합니다.</small>` : ""}
         <h5>기능 상태</h5><table class="tools">${features}</table>
         <h5>과목별 녹음 허락</h5><p>녹음 허락과 외부 AI 전송 동의는 따로 확인합니다. 허락 상태는 이 학기 폴더에 저장합니다.</p>
         ${(s.permissions?.courses || []).map((c) => `<label class="permission-row">${esc(c.course)} <select data-permission="${esc(c.course)}">${Object.entries(s.permissions.states).map(([key, label]) => `<option value="${key}"${c.state === key ? " selected" : ""}>${esc(label)}</option>`).join("")}</select></label>`).join("") || "<small>시간표에 과목을 먼저 추가하세요.</small>"}
         <h5>계정 연결</h5>${keys}
         <h5>프로그램</h5><table class="tools">${tools}</table>
         <h5>실험실 (선택 기능)</h5><div class="labs">${Object.entries(s.lab_names).map(([k, name]) => `<label class="dlg-check"><input type="checkbox" data-lab="${esc(k)}"${s.labs[k] ? " checked" : ""}> ${esc(name)}</label>`).join("")}
-          <small>켜면 왼쪽 메뉴에 나타납니다. 필요한 프로그램이 없으면 위 '기능 상태'에 안내가 나옵니다.</small>
-          ${s.labs.gsr ? `<div class="gsrc"><b>그스룸 동반 이용자</b> <small>한 줄에 한 명: 이름 학번 (최소 4명 중 나를 뺀 3명). 이 PC 설정 파일에만 저장되고 앱 코드나 기록에는 들어가지 않습니다. 본인이 직접 아는 사람의 정보만 넣으세요.</small>
-            <textarea id="gsr-comp" rows="3" class="ask" placeholder="홍길동 2020xxxxx"></textarea><div class="ca"><button data-a="gsrsave">저장</button><span class="cmsg" id="cm-gsr"></span></div>
-            <b>빈 방 고르는 순서</b> <small>여러 방이 비어 있을 때 먼저 잡을 방입니다. 비워 두면 '예약 뒤에도 비는 방 → 방 이름순'으로 고릅니다.</small>
-            <div class="appearance-row"><label>먼저 볼 층 <select id="gsr-floor"><option value="">상관없음</option><option value="4">4층</option><option value="2">2층</option></select></label>
-              <label>뒤로 미룰 방 <input id="gsr-avoid" class="ask" placeholder="G404 G405" size="14"></label>
-              <label>가까운 방 번호 <input id="gsr-center" class="ask short" placeholder="416" size="5"></label>
-              <label class="dlg-check"><input type="checkbox" id="gsr-monitor"> 모니터 있는 방 먼저</label></div>
-            <div class="ca"><button data-a="gsrrooms">순서 저장</button><span class="cmsg" id="cm-gsrrooms"></span></div></div>` : ""}</div>
+          <small>켜면 왼쪽 메뉴에 나타납니다. 필요한 프로그램이 없으면 위 '기능 상태'에 안내가 나옵니다.</small></div>
+        ${s.gsr ? `<h5>그스룸</h5><div class="gsrc"><b>함께 쓰는 사람 (미리 채우기)</b><small>예약 화면의 '함께 쓰는 사람' 칸에 미리 채워집니다. 이 PC 설정 파일에만 저장되고 앱 코드나 기록에는 들어가지 않습니다. 본인이 직접 아는 사람만 넣으세요.</small>
+          ${matesHtml(s.gsr.rows)}<div class="ca"><button data-a="gsrsave">저장</button><span class="cmsg">${esc(s.gsr.msg)}</span></div>
+          <b>빈 방 고르는 순서</b><small>여러 방이 비어 있을 때 먼저 잡을 방입니다. 비워 두면 '예약 뒤에도 비는 방 → 방 이름순'으로 고릅니다.</small>
+          <div class="gsr-rooms"><label>먼저 볼 층 <select data-g="floor_first">${[["", "상관없음"], ["4", "4층"], ["2", "2층"]].map(([k, v]) => `<option value="${k}"${s.gsr.rooms.floor_first === k ? " selected" : ""}>${v}</option>`).join("")}</select></label>
+            <label>뒤로 미룰 방 <input class="ask" data-g="avoid" value="${esc(s.gsr.rooms.avoid)}" placeholder="예: G404 G405"></label>
+            <label>가까운 방 번호 <input class="ask short" data-g="center" value="${esc(s.gsr.rooms.center)}" placeholder="416" inputmode="decimal"></label>
+            <label class="dlg-check"><input type="checkbox" data-g="prefer_monitor"${s.gsr.rooms.prefer_monitor ? " checked" : ""}> 모니터 있는 방 먼저</label></div>
+          <div class="ca"><button data-a="gsrrooms">순서 저장</button><span class="cmsg">${esc(s.gsr.rmsg)}</span></div></div>` : ""}
         <div class="acts"><button data-a="refind">프로그램 다시 찾기</button><button class="primary" data-a="done">닫기</button></div></div>`;
       const dlg = scrim.querySelector(".dialog");
       if (dlg && keep) { dlg.scrollTop = keep[0]; scrim.scrollTop = keep[1]; }
-      const box = scrim.querySelector("#gsr-comp");
-      if (box) api.gsr_companions_get().then((r) => { if (r.ok) box.value = r.text; });
-      if (box) api.gsr_rooms_get().then((r) => {
-        if (!r.ok) return;
-        scrim.querySelector("#gsr-floor").value = r.rooms.floor_first ? String(r.rooms.floor_first) : "";
-        scrim.querySelector("#gsr-avoid").value = r.rooms.avoid.join(" ");
-        scrim.querySelector("#gsr-center").value = r.rooms.center == null ? "" : String(r.rooms.center);
-        scrim.querySelector("#gsr-monitor").checked = !!r.rooms.prefer_monitor;
-      });
     }
     scrim.addEventListener("change", async (e) => {
+      if (e.target.matches("[data-live-engine]")) { const r = await api.live_engine_set(e.target.value); toast(r.ok ? "실시간 전사 엔진을 바꿨습니다 · 다음에 켤 때부터" : r.error); return; }
       const engine = e.target.closest("[data-ai-feature]");
       if (engine) { const r = await api.ai_select(engine.value, engine.dataset.aiFeature); if (!r.ok) toast(r.error); await load(); return; }
       const appearance = e.target.closest("[data-appearance]");
@@ -3105,32 +3211,58 @@
       const r = await api.lab_set(box.dataset.lab, box.checked);
       if (r.ok) { ui.info.labs = r.labs; applyLabs(); await load(); } else toast(r.error);
     });
+    scrim.addEventListener("input", (e) => {
+      if (!gsr) return;
+      if (matesInput(e, gsr.rows)) return;
+      const g = e.target.closest("[data-g]"); if (g) gsr.rooms[g.dataset.g] = g.type === "checkbox" ? g.checked : g.value;
+    });
     scrim.addEventListener("click", async (e) => {
+      if (gsr && matesClick(e.target, gsr.rows)) return draw(last);
       const b = e.target.closest("button[data-a]");
       if (!b) { if (e.target === scrim) scrim.remove(); return; }
       const a = b.dataset.a, row = b.closest(".conn"), id = row ? row.dataset.id : b.dataset.id;
       const say = (m) => { const el = scrim.querySelector("#cm-" + id); if (el) el.textContent = m; };
       if (a === "done") { scrim.remove(); loadEngines(); return; }
       if (a === "tt") { if (await openTimetable()) await load(); return; }
-      if (a === "gsrsave") { const r = await api.gsr_companions_set(scrim.querySelector("#gsr-comp").value); const m = scrim.querySelector("#cm-gsr"); if (m) m.textContent = r.ok ? `저장했습니다(${r.count}명)` : r.error; return; }
-      if (a === "gsrrooms") {
-        const q = (s) => scrim.querySelector(s);
-        const r = await api.gsr_rooms_set({ floor_first: q("#gsr-floor").value, avoid: q("#gsr-avoid").value, center: q("#gsr-center").value.trim(), prefer_monitor: q("#gsr-monitor").checked });
-        const m = q("#cm-gsrrooms"); if (m) m.textContent = r.ok ? "저장했습니다" : r.error; return;
-      }
       if (a === "refind") { await load(true); return; }
+      if (a === "gsrsave" && gsr) { const r = await api.gsr_companions_set(matesText(gsr.rows)); gsr.msg = r.ok ? `저장했습니다(${r.count}명)` : r.error; return draw(last); }
+      if (a === "gsrrooms" && gsr) {
+        const q = gsr.rooms, r = await api.gsr_rooms_set({ floor_first: q.floor_first, avoid: q.avoid, center: String(q.center).trim(), prefer_monitor: !!q.prefer_monitor });
+        gsr.rmsg = r.ok ? "저장했습니다" : r.error; return draw(last);
+      }
       if (a === "help" || a === "thelp") { await api.conn_open_help(id); return; }
       if (a === "remove") {
         if (!(await dialog({ title: "연결 끊기", body: "이 PC에 저장된 키를 지웁니다. 서비스 쪽 키는 그대로이니 필요하면 그곳에서 지우세요.", ok: "끊기", tone: "danger" }))) return;
         const r = await api.conn_remove(id); toast(r.ok ? (r.still_from_env ? "저장된 키를 지웠습니다. 환경 변수의 키는 남아 있습니다." : "끊었습니다") : r.error); await load(); return;
       }
       if (a === "connect") {
-        const key = await askText({ title: "연결", ok: "확인 후 저장", secret: true, body: "붙여 넣은 키는 이 서비스에 맞는지 확인한 뒤 이 PC의 Windows 자격 증명 관리자에만 저장합니다." });
-        if (!key || !key.trim()) return;
-        busy = id; draw(await api.conn_status()); const r = await api.conn_connect(id, key.trim()); busy = "";
-        await load(); say(r.ok ? "연결했습니다" : r.error); return;
+        const label = (row && row.querySelector(".ct b") || {}).textContent || "연결";
+        for (;;) {  // a failed try says clearly that nothing was saved and offers to paste again
+          const key = await askText({ title: `${label} 연결`, ok: "확인 후 저장", secret: true, body: "붙여 넣은 키가 이 서비스에서 통하는지 먼저 확인하고, 통할 때만 이 PC의 Windows 자격 증명 관리자에 저장합니다." });
+          if (!key || !key.trim()) return;
+          busy = id; delete note[id]; draw(last);
+          const r = await api.conn_connect(id, key.trim()); busy = "";
+          if (r.ok && r.saved) {
+            note[id] = { tone: "ok", text: `연결했습니다${r.account ? ` — ${r.account} 계정으로 확인` : ""} · 저장됨` };
+            toast(`${label}: 연결하고 저장했습니다`); await load(); return;
+          }
+          note[id] = { tone: "bad", text: "저장하지 않았습니다 — " + (r.error || "이유 미상") };
+          await load();
+          const again = await dialog({ title: "연결하지 못했습니다 · 저장 안 됨", body: `${r.error || "이유 미상"} 키는 저장하지 않았습니다. [다시 붙여 넣기]를 누르면 처음부터 다시 확인합니다.`,
+            ok: "다시 붙여 넣기", cancel: "닫기", extra: r.can_save_anyway ? "확인 없이 저장" : "" });
+          if (again === "extra") {
+            const s = await api.conn_save_unchecked(id, key.trim());
+            note[id] = s.saved ? { tone: "warn", text: "확인하지 못한 채 저장했습니다 — 인터넷이 되면 [테스트]를 눌러 보세요" } : { tone: "bad", text: s.error };
+            await load(); return;
+          }
+          if (again !== true) return;
+        }
       }
-      if (a === "test") { busy = id; draw(await api.conn_status()); const r = await api.conn_test(id); busy = ""; await load(); say(r.ok ? "정상입니다" : r.error); }
+      if (a === "test") {
+        busy = id; delete note[id]; draw(last); const r = await api.conn_test(id); busy = "";
+        note[id] = r.ok ? { tone: "ok", text: `정상입니다${r.account ? ` — ${r.account} 계정` : ""}` } : { tone: "bad", text: r.error };
+        await load();
+      }
     });
     await load();
   }
@@ -3329,8 +3461,11 @@
     try { await startApp(); } catch (err) { startFailed(err); }
   }
   // a background load that failed (bridge busy, file locked): say so once in a while instead of failing silently
+  const report = (what) => { try { if (api && api.client_error) api.client_error(String(what).slice(0, 2000)).catch(() => {}); } catch (_) { /* never loop */ } };
+  window.addEventListener("error", (e) => report(`error: ${e.message} @ ${e.filename}:${e.lineno}:${e.colno} ${(e.error && e.error.stack) || ""}`));
   window.addEventListener("unhandledrejection", (e) => {
     console.error(e.reason);
+    report(`rejection: ${(e.reason && (e.reason.stack || e.reason.message)) || e.reason}`);
     if (Date.now() - (ui.rejectToast || 0) < 60000 || !window.__lecturehubReady) return;
     ui.rejectToast = Date.now(); toast("일부 정보를 불러오지 못했습니다 · 잠시 뒤 다시 읽습니다");
   });

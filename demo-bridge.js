@@ -215,6 +215,7 @@ window.__DEMO_CALLS = {"init[]": {"courses": [{"folder": "유체역학 체험", 
     return roomJob("return", "반납", [ids[0]]);
   }
 
+  let liveEngine = "quick";
   const LIVE = {
     conn_status: connStatus, conn_connect: connConnect, conn_test: (p) => (conn[p] ? { ok: true } : { ok: false, error: "연결된 키가 없어요" }),
     conn_remove: (p) => { delete conn[p]; return { ok: true }; },
@@ -246,6 +247,9 @@ window.__DEMO_CALLS = {"init[]": {"courses": [{"folder": "유체역학 체험", 
     suggest_course: () => ({ course: COURSE }),  // the trial timetable's class, whatever day the page is opened
     sidebar_state: () => ({ ok: true }), set_selection: () => ({ ok: true }), notices_seen: () => ({ ok: true }),
     class_reminder_set: () => ({ ok: true }), show_mini: () => ({ ok: true }),
+    live_engine_get: () => ({ ok: true, engine: liveEngine, engines: { quick: "Gemini Live — 말하자마자 글로", chirp: "Chirp 3 — 더 정확, 15~25초 늦게", both: "둘 다" } }),
+    live_engine_set: (v) => { liveEngine = v; return { ok: true }; },
+    side_view: () => ({ ok: true, note: "체험판: 앱에서는 창이 화면 오른쪽 1/3로 붙어요" }),
   };
   function answer(name, args) {
     if (name in LIVE) return LIVE[name](...args);
@@ -256,6 +260,7 @@ window.__DEMO_CALLS = {"init[]": {"courses": [{"folder": "유체역학 체험", 
       v.config_error = null;  // recorded before the trial wrote recorder.toml (fixed in the app)
       v.features = Object.assign({}, v.features, { captions: { state: "ready" } });
       v.course = (LECTURE && LECTURE.course) || v.course;
+      v.edition = Object.assign({}, v.edition, { gsr_prefs: false, captions: false });  // recorded before these keys existed
       return v;
     }
     const exact = CALLS[key(name, args)];
