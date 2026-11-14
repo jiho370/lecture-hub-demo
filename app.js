@@ -1898,8 +1898,8 @@
     const words = (s) => String(s || "").split(/\s+/).map(norm).filter(Boolean);
     const marked = (text, other) => text.split(/(\s+)/).map((w) => (!w.trim() || other.has(norm(w)) ? esc(w) : `<mark class="cmp-d">${esc(w)}</mark>`)).join("");
     const draw = async () => {
-      const opts = (cur) => list.map((t) => `<option value="${esc(t.id)}"${t.id === cur ? " selected" : ""}>${esc(t.label)}${t.in_use ? " · 사용본" : ""}</option>`).join("");
-      const useBtn = (id) => (id === use.id ? `<span class="b use">사용본</span>` : `<button class="ghost" data-use="${esc(id)}">이쪽을 사용본으로</button>`);
+      const opts = (cur) => list.map((t) => `<option value="${esc(t.id)}"${t.id === cur ? " selected" : ""}>${esc(t.label)}</option>`).join("");
+      const useBtn = (id) => (id === use.id ? `<span class="cmp-use">사용본</span>` : `<button class="ghost" data-use="${esc(id)}">이쪽을 사용본으로</button>`);
       scrim.querySelector("#cmpTop").innerHTML = `<div class="cmp-col"><select data-side="a">${opts(pick.a)}</select>${useBtn(pick.a)}</div><div class="cmp-col"><select data-side="b">${opts(pick.b)}</select>${useBtn(pick.b)}</div>`;
       const [ra, rb] = await Promise.all([api.transcript(pick.a), api.transcript(pick.b)]);
       const A = ra.segments || [], B = rb.segments || [];
@@ -3217,7 +3217,7 @@
         <div class="ca"><button data-a="connect" ${busy ? "disabled" : ""}>${k.connected ? "키 바꾸기" : "연결"}</button>
           ${k.connected ? `<button data-a="test" ${busy ? "disabled" : ""}>테스트</button><button class="ghost" data-a="remove">연결 끊기</button>` : ""}
           <button class="ghost" data-a="help">키 받는 곳 ↗</button><span class="cmsg${note[k.id] ? " " + note[k.id].tone : ""}" id="cm-${esc(k.id)}">${busy === k.id ? "서비스에 확인하는 중… (몇 초)" : note[k.id] ? esc(note[k.id].text) : ""}</span></div></div>`).join("");
-      const tools = s.tools.map((t) => `<tr><td>${esc(t.label)}</td><td>${t.found ? "✔ 있음" : t.required ? "✖ 필요" : "– 없음(선택)"}${t.signed_in === true ? " · 로그인됨" : t.signed_in === false ? " · 로그인 필요" : ""}</td>
+      const tools = s.tools.map((t) => `<tr><td>${esc(t.label)}</td><td>${t.found ? "✓ 있음" : t.required ? "✕ 필요" : "– 없음(선택)"}${t.signed_in === true ? " · 로그인됨" : t.signed_in === false ? " · 로그인 필요" : ""}</td>
         <td>${esc(t.needed_for)}${t.found ? "" : `<br><small>${esc(t.hint)}</small>`}</td><td>${t.help_url && !t.found ? `<button class="ghost" data-a="thelp" data-id="${esc(t.id)}">설치 안내 ↗</button>` : ""}</td></tr>`).join("");
       scrim.innerHTML = `<div class="dialog wide" role="dialog"><h4>설정 · 연결</h4>
         <h5>화면</h5><div class="appearance-row"><label>테마 <select data-appearance="theme">${[["system", "시스템"], ["light", "밝게"], ["dark", "어둡게"]].map(([k,v]) => `<option value="${k}"${s.appearance?.theme === k ? " selected" : ""}>${v}</option>`).join("")}</select></label>
@@ -3437,11 +3437,11 @@
           const note = st.style === "existing" ? `<p class="hint">이미 쓰는 폴더: 앞에서 고른 <b>${esc(st.parent)}</b> 폴더를 학기 폴더로 그대로 씁니다(그 안에 _lecturehub만 더합니다).</p>` : "";
           return layoutSection(st.layout, "setup", st.style) + note;
         }
-        const row = (t) => `<tr><td>${esc(t.label)}</td><td>${t.found ? "✔ 있음" : t.required ? "✖ 필요" : "– 없음"}</td><td>${esc(t.needed_for)}${t.found ? "" : `<br><small>${esc(t.hint)}</small>`}</td></tr>`;
+        const row = (t) => `<tr><td>${esc(t.label)}</td><td>${t.found ? "✓ 있음" : t.required ? "✕ 필요" : "– 없음"}</td><td>${esc(t.needed_for)}${t.found ? "" : `<br><small>${esc(t.hint)}</small>`}</td></tr>`;
         const all = Object.values(st.tools), need = all.filter((t) => t.required), lack = need.filter((t) => !t.found);
         const head = lack.length
           ? `<p class="err">녹음 파일을 마무리하는 데 필요한 프로그램(${lack.map((t) => esc(t.label)).join(", ")})이 없습니다. 아래 안내대로 설치한 뒤 앱을 다시 켜세요. 설정은 지금 저장해 둘 수 있습니다.</p>`
-          : `<p class="ok-line">✔ 녹음에 필요한 프로그램이 모두 있습니다. 바로 시작할 수 있어요.</p>`;
+          : `<p class="ok-line">✓ 녹음에 필요한 프로그램이 모두 있습니다. 바로 시작할 수 있어요.</p>`;
         return `${head}<table class="tools">${need.map(row).join("")}</table>
           <details class="opt-tools"><summary>선택 프로그램 보기 — 없어도 녹음과 전사는 됩니다</summary><table class="tools">${all.filter((t) => !t.required).map(row).join("")}</table></details>`;
       }
