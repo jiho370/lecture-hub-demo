@@ -17,6 +17,12 @@ window.__DEMO_CALLS = {"init[]": {"courses": [{"folder": "유체역학 체험", 
   const LECTURE_ID = LECTURE && LECTURE.id;
   const NOTES = LECTURE ? clone(LECTURE.notes || []) : [];
   NOTES.forEach((n) => { if (n.exists && !n.url) n.url = "demo:note"; });  // recorded without the local media server
+  // the synthetic class also announces a closure (the AI notice reader finds it with the quiz, user 2026-11-14)
+  const CLOSURE_TEXT = "아, 그리고 다음 주 목요일은 학과 현장 답사 때문에 휴강입니다. 보강은 eTL로 따로 공지할게요.";
+  if (LECTURE && LECTURE.segments && !LECTURE.segments.some((s) => s.text === CLOSURE_TEXT)) {
+    const last = LECTURE.segments[LECTURE.segments.length - 1];
+    LECTURE.segments.push({ ...last, seq: (last.seq || LECTURE.segments.length) + 1, start_ms: last.start_ms + 52000, text: CLOSURE_TEXT, corrections: [] });
+  }
   const SEGMENTS = (LECTURE && LECTURE.segments || []).map((s) => ({ ms: s.start_ms, text: s.text }));
   const LAST_MS = SEGMENTS.length ? SEGMENTS[SEGMENTS.length - 1].ms + 25000 : 600000;
 
@@ -57,6 +63,7 @@ window.__DEMO_CALLS = {"init[]": {"courses": [{"folder": "유체역학 체험", 
     const since = now() - sim.stoppedAt;
     if (since < 900) return { ...base, phase: "stopping" };
     if (since < 2200) return { ...base, phase: "finalizing", summary: { total_ms: sim.total } };
+    if (!cand.found) { cand.found = true; setTimeout(() => window.__lecturehubNotices && window.__lecturehubNotices(), 12000); }  // the AI reads the transcript after it is made
     return { ...base, phase: "done", summary: { total_ms: sim.total, dropped_samples: 0, session_dir: "C:\\Users\\me\\AppData\\Roaming\\lecturehub\\체험 학기\\_lecturehub\\recordings\\demo", master: "demo.mp3" },
       link: { state: "linked", media_id: "demo-media", lecture_id: LECTURE_ID, confidence: "high", reason: "시간표의 수업 시간과 맞음" },
       transcription: { state: "done", label: "완료 · Google (체험판은 미리 만든 전사)" } };
@@ -79,6 +86,49 @@ window.__DEMO_CALLS = {"init[]": {"courses": [{"folder": "유체역학 체험", 
     const next = SEGMENTS.find((s) => s.ms <= ms && s.ms + 4000 > ms);
     return { state: sim.pausedAt ? "paused" : "running", running: true, paused: !!sim.pausedAt, elapsed_s: ms / 1000, lines,
       interim: next ? next.text.slice(0, Math.max(4, Math.round(next.text.length * (ms - next.ms) / 4000))) : "" };
+  }
+
+  // ---- a second engine (Whisper via Groq) for 나란히 비교: the same class with the usual small STT differences
+  const GOOGLE_ID = LECTURE && LECTURE.in_use ? LECTURE.in_use.transcript_id : "demo-google", WHISPER_ID = "demo-whisper";
+  const WHISPER_SWAP = [["수두손실이라고", "수도 손실이라고"], ["다르시-바이스바흐 식", "다르시 바이스바흐식"], ["층류인지", "충류인지"], ["층류라고", "충류라고"],
+    ["레이놀즈 수가", "레이놀드 수가"], ["콜브룩 식을", "콜브룩식을"], ["0.204 해서", "0.2 해서"], ["부차적 손실", "부차 손실"], ["현장 답사", "현장답사"]];
+  const GOOGLE_SEGS = (LECTURE && LECTURE.segments || []).map((s) => ({ seq: s.seq, start_ms: s.start_ms, speaker: null, text: s.text }));
+  const WHISPER_SEGS = GOOGLE_SEGS.map((s, i) => ({ seq: i + 1, start_ms: s.start_ms + 1400, speaker: null,
+    text: WHISPER_SWAP.reduce((a, [x, y]) => a.split(x).join(y), s.text) }));
+  sim.use = GOOGLE_ID;
+  function lectureView(value) {
+    const v = withNotes(value);
+    if (!v || !v.lecture || v.lecture.id !== LECTURE_ID) return v;
+    const L = v.lecture, g = L.transcripts.find((t) => t.id === GOOGLE_ID) || L.transcripts[0];
+    if (!g) return v;
+    if (!L.transcripts.some((t) => t.id === WHISPER_ID))
+      L.transcripts.push({ ...g, id: WHISPER_ID, label: "Whisper (Groq)", engine: "whisper", source_file: "whisper_1112.txt", segments: WHISPER_SEGS.length, last_ms: WHISPER_SEGS[WHISPER_SEGS.length - 1].start_ms });
+    L.transcripts.forEach((t) => { t.in_use = t.id === sim.use; });
+    g.segments = GOOGLE_SEGS.length;
+    L.in_use = { ...(L.in_use || {}), transcript_id: sim.use, decided_by: "user", reason: "사용자가 고름" };
+    if (sim.use === WHISPER_ID) L.segments = WHISPER_SEGS.map((s) => ({ ...s, corrections: [] }));
+    return v;
+  }
+
+  // ---- schedule notices: after the class is transcribed, the AI notice reader lists what was announced (candidates until confirmed)
+  const dayAfter = (s, n) => { const d = new Date(s + "T12:00:00"); d.setDate(d.getDate() + n); return d.toISOString().slice(0, 10); };
+  const LEC_DATE = (LECTURE && LECTURE.date) || "2026-11-12";
+  const CANDS = [
+    { id: "cand-quiz", kind: "quiz", kind_label: "퀴즈", date: dayAfter(LEC_DATE, 6), title: "쪽지 퀴즈 — 관수로 마찰손실", at_ms: 902000,
+      quote: "다음 주 수요일 수업 시작할 때 오늘 내용으로 쪽지 퀴즈 볼 거예요", why: "수업일 기준 '다음 주 수요일'", summary: "다음 주 수요일 수업 시작에 오늘 배운 관수로 마찰손실로 쪽지 퀴즈" },
+    { id: "cand-closure", kind: "closure", kind_label: "휴강", date: dayAfter(LEC_DATE, 7), title: "휴강 (학과 현장 답사)", at_ms: 0,
+      quote: CLOSURE_TEXT, why: "수업일 기준 '다음 주 목요일'", summary: "다음 주 목요일 휴강 — 보강은 eTL로 따로 공지" },
+  ];
+  CANDS[1].at_ms = (LECTURE && LECTURE.segments || []).find((s) => s.text === CLOSURE_TEXT)?.start_ms || 1042000;
+  const cand = { found: false, status: {}, seen: new Set() };
+  CANDS.forEach((c) => { cand.status[c.id] = "candidate"; });
+  const md = (s) => `${+s.slice(5, 7)}/${+s.slice(8, 10)}`;
+  function notices() {
+    if (!cand.found) return { ok: true, unseen: [], recent: [] };
+    const unseen = CANDS.filter((c) => !cand.seen.has(c.id)).map((c) => ({ key: c.id, course: COURSE, date: c.date, date_precision: "exact", kind_label: c.kind_label,
+      certainty: "high", certainty_label: "높음", summary: c.summary, quote: c.quote, lecture_date: LEC_DATE, at_ms: c.at_ms, engines: ["Google", "Whisper"],
+      speaker: "professor", date_reasoning: `${c.why} → ${md(c.date)}`, event_id: c.id, status: cand.status[c.id] }));
+    return { ok: true, unseen, recent: [] };
   }
 
   // ---- note making playback: the real result (with one invented sentence caught) appears after a few seconds
@@ -156,16 +206,23 @@ window.__DEMO_CALLS = {"init[]": {"courses": [{"folder": "유체역학 체험", 
     if (v.ok === undefined) v.ok = true;
     v.year = year; v.month = month;
     const mine = extraEvents.slice();
+    const inMonthC = (c) => c.date.startsWith(`${year}-${String(month).padStart(2, "0")}`);
+    if (cand.found) CANDS.forEach((c) => {
+      if (cand.status[c.id] === "confirmed") mine.push({ id: c.id, date: c.date, title: c.title, kind: c.kind, course: COURSE, source: "lecture", status: "todo" });
+    });
+    v.candidates = (v.candidates || []).concat(cand.found ? CANDS.filter((c) => cand.status[c.id] === "candidate" && inMonthC(c)).map((c) => ({
+      id: c.id, course: COURSE, course_id: ((v.courses || [])[0] || {}).id || "", kind: c.kind, kind_label: c.kind_label, date: c.date, date_text: md(c.date), title: c.title, status: "candidate",
+      evidence: { engines_agree: 2, quote: c.quote, lecture_id: LECTURE_ID, at_ms: c.at_ms } })) : []);
     if (etl.synced) mine.push({ id: "etl-1", date: iso(day(9)), title: "과제 1 관수로 마찰손실", kind: "assignment", course: COURSE, source: "etl", status: "todo", time: "23:59" });
     const inMonth = (e) => e.date && e.date.startsWith(`${year}-${String(month).padStart(2, "0")}`);
-    const LABEL = { assignment: "과제", exam: "시험", closure: "휴강", makeup: "보강", personal: "개인" };
+    const LABEL = { assignment: "과제", exam: "시험", quiz: "퀴즈", closure: "휴강", makeup: "보강", personal: "개인" };
     v.events = (v.events || []).concat(mine.filter((e) => inMonth(e) && e.kind !== "closure")
       .map((e) => Object.assign({ kind_label: LABEL[e.kind] || "일정" }, e)));
     v.exceptions = (v.exceptions || []).concat(mine.filter((e) => inMonth(e) && e.kind === "closure")  // the app keeps a closure as a class exception
       .map((e) => ({ date: e.date, course: e.course || COURSE, kind: "휴강", note: e.title || "", confirmation: "confirmed_by_user" })));
     const today = new Date(iso(new Date()));
     v.upcoming = (v.upcoming || []).concat(mine.filter((e) => e.date >= iso(new Date()))
-      .map((e) => Object.assign({ start_ms: null, kind_label: "과제" }, e, { d_day: Math.round((new Date(e.date) - today) / 864e5) })));
+      .map((e) => Object.assign({ start_ms: null, kind_label: LABEL[e.kind] || "과제" }, e, { d_day: Math.round((new Date(e.date) - today) / 864e5) })));
     return v;
   }
 
@@ -247,9 +304,18 @@ window.__DEMO_CALLS = {"init[]": {"courses": [{"folder": "유체역학 체험", 
     etl_file_take: () => ({ ok: false, error: "체험판은 파일을 내려받지 않아요 · 앱에서는 과목 폴더의 '강의자료'로 받아요" }),
     etl_file_keep: () => ({ ok: true }),
     calendar, calendar_add: (v) => { extraEvents.push(Object.assign({ id: `me-${extraEvents.length + 1}`, source: "user", status: "todo" }, v)); return { ok: true }; },
-    calendar_status: () => ({ ok: true }), calendar_update: () => ({ ok: true }),
+    calendar_status: (id, st) => { if (id in cand.status) { cand.status[id] = st; cand.seen.add(id); } return { ok: true }; },
+    calendar_update: (id, v) => { const c = CANDS.find((x) => x.id === id); if (c && v) { if (v.date || v.day) c.date = v.date || v.day; if (v.title) c.title = v.title; } return { ok: true }; },
+    notices, transcript: (id) => ({ segments: clone(id === WHISPER_ID ? WHISPER_SEGS : GOOGLE_SEGS), media: null }),
+    choose_transcript: (lid, tid) => { sim.use = tid; return { ok: true }; },
     room: roomView, room_refresh: () => roomJob("list", "예약 목록 확인", []),
-    room_book: (d, s, u, r, h) => roomJob("book", "예약", [d, s, u, r, h]),
+    room_book: (d, s, u, r, h, mates, me) => {
+      const rows = String(mates || "").split("\n").map((l) => l.trim()).filter(Boolean).map((l) => l.split(/\s+/));
+      if (rows.some((x) => x.length < 2 || x[0] === "?" || !/^\d{6,12}$/.test(x[x.length - 1]))) return { ok: false, error: "'이름 학번' 모양으로 적어 주세요" };
+      if (rows.length < 3) return { ok: false, error: `함께 쓰는 사람을 나를 빼고 3명 이상 '이름 학번'으로 적어 주세요 (지금 ${rows.length}명)` };
+      if (!/^\S+\s+\d{6,12}$/.test(String(me || "").trim())) return { ok: false, error: "신청인(나)의 이름과 학번을 적어 주세요" };
+      return roomJob("book", "예약", [d, s, u, r, h]);
+    },
     room_cancel: (ids) => roomJob("cancel", "예약 취소", [ids]), room_return: (id) => roomJob("return", "반납", [id]),
     room_stop: () => { room.job = { state: "stopped", action: room.job.action }; return { ok: true }; },
     room_chat: roomChat, room_chat_confirm: roomChatConfirm, room_rules: () => ({ ok: true }),
@@ -272,7 +338,7 @@ window.__DEMO_CALLS = {"init[]": {"courses": [{"folder": "유체역학 체험", 
     start_selected: () => start(),
     save_memo: () => ({ ok: true, saved_at: Date.now() / 1000 }), bookmark: () => ({ ok: true }),
     suggest_course: () => ({ course: COURSE }),  // the trial timetable's class, whatever day the page is opened
-    sidebar_state: () => ({ ok: true }), set_selection: () => ({ ok: true }), notices_seen: () => ({ ok: true }),
+    sidebar_state: () => ({ ok: true }), set_selection: () => ({ ok: true }), notices_seen: (keys) => { (keys || []).forEach((k) => cand.seen.add(k)); return { ok: true }; },
     class_reminder_set: () => ({ ok: true }),
     live_engine_get: () => ({ ok: true, engine: liveEngine, choices: { quick: "Gemini Live — 말하자마자 글로(무료 Gemini 키, 소음에 약함)", chirp: "Chirp 3 — 더 정확, 15~25초 늦게 나옴(Google Cloud 로그인, 월 60분 무료 뒤 유료)", both: "둘 다 — 빠른 줄을 먼저 보이고 Chirp 줄로 확정" } }),
     live_engine_set: (v) => { liveEngine = v; return { ok: true }; },
@@ -280,7 +346,7 @@ window.__DEMO_CALLS = {"init[]": {"courses": [{"folder": "유체역학 체험", 
   };
   // the web trial shows the school ChatGPT (Codex) note engine only: other engines recorded on the builder's PC are left out
   const SOFT = [["중간고사에 그대로 나오니까", "다음 실습에서 그대로 쓰니까"], ["중간고사에 그대로 나온다고 했다", "다음 실습에서 그대로 쓴다고 했다"],
-    ["쪽지 퀴즈 볼 거예요", "확인 문제를 같이 풀 거예요"], ["쪽지 퀴즈가 있다", "확인 문제를 함께 푼다"], ["쪽지 퀴즈", "확인 문제"], ["퀴즈", "확인 문제"]];
+  ];
   const soft = (s) => SOFT.reduce((a, [x, y]) => a.split(x).join(y), s);
   function scrub(v) {
     if (typeof v === "string") return soft(v);
@@ -319,6 +385,7 @@ window.__DEMO_CALLS = {"init[]": {"courses": [{"folder": "유체역학 체험", 
       return v;
     }
     const exact = CALLS[key(name, args)];
+    if (name === "lecture" && exact !== undefined) return lectureView(exact);
     if (exact !== undefined) return withNotes(exact);
     if (name in byName) return withNotes(byName[name]);
     return APP_ONLY;

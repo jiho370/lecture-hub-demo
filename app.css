@@ -1059,3 +1059,17 @@ body:has(.qa-panel.with-deck) .cap-panel{display:none}
 .recmini.on .dot { background: var(--rec); }
 
 .mate input.m-name, .dialog .mate input.m-name { width: 4.6em; text-align: center; }
+
+/* 전사본 나란히 비교 (2026-11-14) */
+.cmp-panel{background:var(--panel);border-radius:12px;width:min(1100px,94vw);height:min(720px,88vh);display:flex;flex-direction:column;box-shadow:0 18px 50px rgba(0,0,0,.25);overflow:hidden}
+.cmp-top{display:grid;grid-template-columns:64px 1fr 1fr;gap:10px;padding:8px 16px;border-bottom:1px solid var(--line,#e4dfd3)}
+.cmp-top::before{content:""}
+.cmp-col{display:flex;gap:8px;align-items:center;min-width:0}
+.cmp-col select{flex:1;min-width:0}
+.cmp-body{overflow:auto;padding:4px 16px 16px;flex:1}
+.cmp-sum{font-size:12px;color:var(--faint,#888);padding:8px 0}
+.cmp-row{display:grid;grid-template-columns:64px 1fr 1fr;gap:10px;padding:7px 0;border-bottom:1px solid var(--line,#eee);font-size:13px;line-height:1.55}
+.cmp-row .t{cursor:pointer;color:var(--faint,#888)}
+.cmp-row .t:hover{color:var(--accent,#2f6b4f)}
+.cmp-row .cx{min-width:0;overflow-wrap:anywhere}
+mark.cmp-d{background:rgba(214,160,60,.28);color:inherit;border-radius:3px;padding:0 1px}

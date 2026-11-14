@@ -1122,6 +1122,7 @@
     $("lvHead").innerHTML = L.transcripts.length
       ? L.transcripts.map((t) => `<span class="b${t.in_use ? " use" : ""}" title="${esc(t.source_file || "")}">${esc(t.label)}${t.in_use ? " · 사용본" : ""}</span>`).join("") +
         (L.transcripts.length > 1 ? `<span class="switch" id="switchUse">사용본 바꾸기 ▾</span>` : "") +
+        (L.transcripts.filter((t) => t.segments).length > 1 ? `<span class="switch" id="cmpTr" title="두 엔진의 전사를 시각에 맞춰 나란히 놓고 다른 낱말을 표시합니다">나란히 비교</span>` : "") +
         (L.transcripts.some((t) => t.segments) ? `<span class="switch" id="saveTr" title="전사본을 .txt로 다운로드 폴더에 저장합니다(내가 고친 곳 반영)">내려받기${L.transcripts.filter((t) => t.segments).length > 1 ? " ▾" : ""}</span>` : "")
       : `<span>전사본 없음</span>`;
     const R = L.range, D = R && R.decided;
@@ -1879,6 +1880,54 @@
       });
   }
 
+  /* 나란히 비교 (user 2026-11-14): two engines' transcripts side by side, rows follow the left one by time;
+     words found in only one side are marked. Either side can become the 사용본 from here. */
+  async function compareTranscripts() {
+    const L = ui.lecture, list = L.transcripts.filter((t) => t.segments);
+    if (list.length < 2) return;
+    const use = list.find((t) => t.in_use) || list[0];
+    const pick = { a: use.id, b: (list.find((t) => t.id !== use.id) || list[1]).id };
+    const scrim = document.createElement("div");
+    scrim.className = "scrim cmp-scrim";
+    scrim.innerHTML = `<div class="cmp-panel"><div class="cal-head"><b>전사본 나란히 비교</b><small class="room-sub">같은 시각의 말을 한 줄에 · 한쪽에만 있는 낱말은 색으로</small><span class="grow"></span><button class="ibtn" data-c="close" title="닫기">✕</button></div><div class="cmp-top" id="cmpTop"></div><div class="cmp-body" id="cmpBody"><div class="hint">불러오는 중…</div></div></div>`;
+    document.body.appendChild(scrim); keepFocus(scrim);
+    const close = () => { scrim.remove(); document.removeEventListener("keydown", key); };
+    const key = (e) => { if (e.key === "Escape" && isTop(scrim)) close(); };
+    document.addEventListener("keydown", key);
+    const norm = (w) => w.replace(/^[“"'(]+|[.,?!·…"”')]+$/g, "");  // edge punctuation only: 0.02 stays one word
+    const words = (s) => String(s || "").split(/\s+/).map(norm).filter(Boolean);
+    const marked = (text, other) => text.split(/(\s+)/).map((w) => (!w.trim() || other.has(norm(w)) ? esc(w) : `<mark class="cmp-d">${esc(w)}</mark>`)).join("");
+    const draw = async () => {
+      const opts = (cur) => list.map((t) => `<option value="${esc(t.id)}"${t.id === cur ? " selected" : ""}>${esc(t.label)}${t.in_use ? " · 사용본" : ""}</option>`).join("");
+      const useBtn = (id) => (id === use.id ? `<span class="b use">사용본</span>` : `<button class="ghost" data-use="${esc(id)}">이쪽을 사용본으로</button>`);
+      scrim.querySelector("#cmpTop").innerHTML = `<div class="cmp-col"><select data-side="a">${opts(pick.a)}</select>${useBtn(pick.a)}</div><div class="cmp-col"><select data-side="b">${opts(pick.b)}</select>${useBtn(pick.b)}</div>`;
+      const [ra, rb] = await Promise.all([api.transcript(pick.a), api.transcript(pick.b)]);
+      const A = ra.segments || [], B = rb.segments || [];
+      if (!A.length || !B.length) { scrim.querySelector("#cmpBody").innerHTML = `<div class="hint">전사 내용을 불러오지 못했습니다.</div>`; return; }
+      let k = 0, diff = 0;
+      const rows = A.map((g, i) => {
+        const until = i + 1 < A.length ? A[i + 1].start_ms : Infinity, right = [];
+        while (k < B.length && B[k].start_ms < until) right.push(B[k++]);
+        const ta = g.text, tb = right.map((x) => x.text).join(" ");
+        const wa = new Set(words(ta)), wb = new Set(words(tb));
+        const la = marked(ta, wb), lb = tb ? marked(tb, wa) : `<span class="faint">(이 시각에 들은 말 없음)</span>`;
+        diff += (la.match(/cmp-d/g) || []).length + (lb.match(/cmp-d/g) || []).length;
+        return `<div class="cmp-row"><div class="t num" data-seek="${g.start_ms}">${clock(g.start_ms)}</div><div class="cx">${la}</div><div class="cx">${lb}</div></div>`;
+      });
+      scrim.querySelector("#cmpBody").innerHTML = `<div class="cmp-sum">${A.length}문단 · 한쪽에만 있는 낱말 ${diff}곳 — 시각을 누르면 그 자리부터 들을 수 있습니다</div>` + rows.join("");
+    };
+    scrim.addEventListener("change", (e) => { const s = e.target.closest("select[data-side]"); if (!s) return; pick[s.dataset.side] = s.value; draw(); });
+    scrim.addEventListener("click", async (e) => {
+      if (e.target === scrim || e.target.closest('[data-c="close"]')) return close();
+      const t = e.target.closest("[data-seek],[data-use]"); if (!t) return;
+      if (t.dataset.seek) { close(); return jumpTo(+t.dataset.seek, true); }
+      const r = await api.choose_transcript(L.id, t.dataset.use);
+      if (!r.ok) { toast(r.error); return; }
+      toast("사용본을 바꿨습니다(이력 기록)"); close(); openLecture(L.id);
+    });
+    draw();
+  }
+
   async function transcribeLecture() {
     const L = ui.lecture, rec = L.recordings.find((r) => r.exists);
     if (!rec) { toast("연결된 녹음 파일을 찾지 못했습니다"); return; }
@@ -2295,7 +2344,7 @@
     const publicRooms = (ui.info.edition || {}).name === "public";
     const prefs = !publicRooms && (ui.info.edition || {}).gsr_prefs !== false;  // full build: saved companions prefill the form
     const rulesOnly = only === "rules" && !publicRooms;  // 사이드바 정기 예약 버튼: 규칙·다음 시도·정기 예약 기록만
-    const st = { data: null, day: null, start: "15:00", hours: 3, use: "과제", room: "", mates: matesFrom([]), saved: [], rules: [], auto: true, dirty: false, lastJob: null, alts: null, notice: null, chat: [], thinking: false };
+    const st = { data: null, day: null, start: "15:00", hours: 3, use: "과제", room: "", mates: matesFrom([]), me: [["", "", ""]], saved: [], rules: [], auto: true, dirty: false, lastJob: null, alts: null, notice: null, chat: [], thinking: false };
     const scrim = document.createElement("div");
     scrim.className = "scrim cal-scrim room-scrim";
     scrim.innerHTML = rulesOnly
@@ -2310,6 +2359,7 @@
     if (prefs && !rulesOnly) api.gsr_companions_get().then((r) => {
       if (!r.ok || !r.rows.length) return;
       st.saved = r.rows;
+      if (r.applicant && !matesText(st.me)) st.me = [[r.applicant[0], String(r.applicant[1]).slice(0, 4), String(r.applicant[1]).slice(4)]];
       if (!matesText(st.mates)) { st.mates = matesFrom(r.rows); if (st.data && main.querySelector(".room-mates")) draw(); }
     });
     const hm = (t) => (t && t.length === 4 ? `${t.slice(0, 2)}:${t.slice(2)}` : t || "");
@@ -2432,6 +2482,7 @@
       const seen = r.updated_at ? `마지막 확인 ${stamp(r.updated_at)}${r.updated_by ? " · " + (BY[r.updated_by] || r.updated_by) : ""}` : "아직 확인 안 함 — 위 [예약 목록 확인]";
       main.innerHTML = `<div class="sl">날짜 (3일 뒤까지)</div><div class="chips">${days}</div>
         <div class="room-form">${r.public ? `<label>방<input id="rRoom" value="${esc(st.room)}" maxlength="4" placeholder="방 번호" style="width:76px"></label>` : ""}<label>시작<select id="rStart">${opt(r.starts, st.start)}</select></label><label>길이<select id="rHours">${hopt(st.hours)}</select></label><span class="room-end">~ ${plus3h(st.start, st.hours)}</span><label>용도<select id="rUse">${opt(r.uses, st.use)}</select></label><button class="primary" data-c="book"${dis}>${hText(st.hours)} 예약</button></div>
+        <div class="room-mates room-me"><div class="sl">신청인 (나) <small>로그인할 계정의 이름과 학번 · 사이트에서 같은 사람인지 확인합니다</small></div><div class="mates" data-me="1">${mateRow(st.me[0], 0).replace(/<button class="ibtn m-del"[^]*?<\/button>/, "")}</div></div>
         <div class="room-mates"><div class="sl">함께 쓰는 사람 <small>나를 빼고 3명 이상 · 학번은 앞 4자리와 뒷자리를 나눠 적습니다 · ${prefs ? "설정에 저장한 사람이 미리 채워집니다. 여기서 바꾸면 이번 예약에만 씁니다" : "이번 예약에만 쓰고 저장하지 않습니다"}</small></div>${matesHtml(st.mates)}</div>
         <div class="sl">시간표 공강 추천 — 누르면 위에 채워짐</div><div class="chips">${sug}</div>${alts}
         <div class="sl">내 예약 <small>${esc(seen)}</small></div>${r.active.map((b) => row(b, dis)).join("") || `<div class="hint">다가오는 예약이 없습니다.</div>`}
@@ -2448,7 +2499,18 @@
       if (booking) st.mates = matesFrom(st.saved);  // typed for each booking (full build: back to the saved list)
       st.notice = null; st.lastJob = "running"; load();
     };
-    scrim.addEventListener("input", (e) => { matesInput(e, st.mates); });
+    scrim.addEventListener("input", (e) => { matesInput(e, e.target.closest("[data-me]") ? st.me : st.mates); });
+    // 4 people in all: me + at least 3 companions, every row with a name and a full student number (user 2026-11-14)
+    const peopleError = () => {
+      const full = (m) => m[0].trim() && m[1].length === 4 && m[2].length >= 2;
+      const me = st.me[0];
+      if (!full(me)) return "신청인(나)의 이름과 학번을 적어 주세요";
+      const typed = st.mates.filter((m) => m[0].trim() || m[1] || m[2]);
+      if (typed.some((m) => !full(m))) return "함께 쓰는 사람 중 이름이나 학번이 빈 줄이 있습니다";
+      const n = typed.filter((m) => `${m[1]}${m[2]}` !== `${me[1]}${me[2]}`).length;
+      if (n < 3) return `그룹스터디룸은 4명부터 예약됩니다 — 나 말고 ${3 - n}명을 더 적어 주세요 (지금 ${n + 1}명)`;
+      return "";
+    };
     scrim.addEventListener("keydown", (e) => { if (e.target.id === "rChat" && e.key === "Enter" && !e.isComposing) { e.preventDefault(); sendChat(); } });
     scrim.addEventListener("change", (e) => {
       const t = e.target;
@@ -2476,7 +2538,10 @@
         if (!r.ok) toast(r.error || "중지하지 못했습니다");
         return load();
       }
-      if (c === "book") return start(api.room_book(st.day, st.start, st.use, publicRooms ? st.room : null, st.hours, matesText(st.mates)), true);
+      if (c === "book") {
+        const bad = peopleError(); if (bad) { toast(bad); return; }
+        return start(api.room_book(st.day, st.start, st.use, publicRooms ? st.room : null, st.hours, matesText(st.mates), matesText(st.me)), true);
+      }
       if (c === "radd") { st.rules.push({ weekday: "월", start: "15:00", use: "과제", hours: 3, enabled: true }); st.dirty = true; return draw(); }
       if (c === "rsave") {
         const r = await api.room_rules(st.rules, st.auto);
@@ -2485,7 +2550,10 @@
       }
       if (t.dataset.day) { st.day = t.dataset.day; st.alts = null; return draw(); }
       if (t.dataset.sday) { st.day = t.dataset.sday; st.start = t.dataset.sstart; st.alts = null; return draw(); }
-      if (t.dataset.altRoom) return start(api.room_book(st.day, t.dataset.altStart, st.use, t.dataset.altRoom, publicRooms ? st.hours : 3, matesText(st.mates)), true);
+      if (t.dataset.altRoom) {
+        const bad = peopleError(); if (bad) { toast(bad); return; }
+        return start(api.room_book(st.day, t.dataset.altStart, st.use, t.dataset.altRoom, publicRooms ? st.hours : 3, matesText(st.mates), matesText(st.me)), true);
+      }
       if (t.dataset.ret) {
         const ok = await dialog({ title: `${t.dataset.seat} 반납`, body: "지금 반납하면 이 예약이 끝납니다. 방에서 나왔을 때만 누르세요.", ok: "반납", tone: "danger" });
         if (ok) start(api.room_return(t.dataset.ret));
@@ -2940,7 +3008,7 @@
         ui.maiShown = "running"; api.mai_prepare(rec.path); toast("MAI용 조각을 만드는 중…");
       }
     };
-    $("lvHead").addEventListener("click", (e) => { const bm = e.target.closest(".bm[data-seek]"); if (bm) { jumpTo(+bm.dataset.seek, true); return; } if (e.target.id === "switchUse") chooseTranscript(e); if (e.target.id === "saveTr") { e.stopPropagation(); saveTranscript(e.target); } const r = e.target.closest("[data-range]"); if (r) rangeAction(r); });
+    $("lvHead").addEventListener("click", (e) => { const bm = e.target.closest(".bm[data-seek]"); if (bm) { jumpTo(+bm.dataset.seek, true); return; } if (e.target.id === "switchUse") chooseTranscript(e); if (e.target.id === "cmpTr") compareTranscripts(); if (e.target.id === "saveTr") { e.stopPropagation(); saveTranscript(e.target); } const r = e.target.closest("[data-range]"); if (r) rangeAction(r); });
     $("lvList").addEventListener("click", (e) => {
       const t = e.target.closest("[data-seek]"); if (t) { jumpTo(+t.dataset.seek, true); return; }
       if (e.target.closest("[data-act='transcribe-lecture']")) transcribeLecture();
