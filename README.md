@@ -1,7 +1,9 @@
-# Lecture Hub 웹 체험판
+# Lecture Hub 화면 둘러보기
 
-설치 없이 브라우저에서 Lecture Hub 화면을 그대로 눌러 보는 체험판입니다. 합성 강의 1개로 녹음 → 실시간 전사 → 정리본(각주) 만들기, 그스룸 예약, 계정 연결, eTL 가져오기를 흉내 냅니다. 아무것도 밖으로 보내지 않습니다.
+설치하기 전에 브라우저에서 Lecture Hub 1.1.0의 화면을 눌러 볼 수 있는 페이지입니다. 예시 학기(수문학·토질역학·관개배수공학)의 시간표, 전사, 강의자료, 정리본이 들어 있습니다. 녹음과 AI 실행은 미리 받아 둔 결과를 재생합니다. 이 페이지는 아무것도 밖으로 보내지 않습니다.
 
 - 열기: https://jiho370.github.io/lecture-hub-demo/
-- 실제 녹음과 정리본 만들기는 Windows 앱에서 됩니다.
+- 앱 받기: Microsoft Store https://apps.microsoft.com/detail/9NSZ9V0H0FBR
+- 소스: https://github.com/jiho370/lecturehub
+- 실제 녹음, 전사, 정리본 만들기는 Windows 앱에서 합니다.
 - 글꼴: Pretendard (SIL OFL 1.1, fonts/LICENSE.txt)

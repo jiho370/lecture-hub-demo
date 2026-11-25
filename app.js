@@ -3,6 +3,8 @@
 (function () {
   "use strict";
   const $ = (id) => document.getElementById(id);
+  // icons come from the <symbol> sprite in index.html, never from text glyphs (unslop polish 2026-11-21)
+  const ic = (name) => `<svg class="ic" aria-hidden="true"><use href="#i-${name}"/></svg>`;
   // write only a changed value: the 250 ms poll must not touch the DOM when nothing moved (review #3)
   const setp = (o, k, v) => { if (typeof o[k] === "boolean") v = !!v; if (o[k] !== v) o[k] = v; };
   const sett = (el, v) => setp(el, "textContent", String(v));
@@ -20,7 +22,7 @@
   const isTop = (el) => { if (!el || $("menu")) return false; const all = document.querySelectorAll("body > .scrim"); return all[all.length - 1] === el; };
   // rows drawn as <div>/<span> and handled by click delegation: reachable with Tab, Enter/Space click them
   const CLICKABLE = "[data-toggle],[data-lecture],[data-course],[data-files],[data-memo],[data-open],[data-ev],[data-day],[data-sday]," +
-    "[data-inbox],[data-cands],[data-hw],[data-hwopen],[data-seek],[data-path],[data-event],[data-edit],[data-key],[data-note],[data-f]," +
+    "[data-inbox],[data-cands],[data-seek],[data-path],[data-event],[data-edit],[data-key],[data-note],[data-f]," +
     "[data-media],[data-session],[data-join],[data-sort],[data-range],[data-move],[data-etlf],[data-ann],.hcard,.seg-row";
   const NATIVE = /^(BUTTON|A|INPUT|SELECT|TEXTAREA|LABEL|OPTION|IFRAME)$/;
   function keyable(root) {
@@ -46,7 +48,8 @@
   /* ---------- dialog (replaces window.confirm, same visual language as the mockup) ---------- */
   // tone "danger": the safe button (cancel) has the focus and Enter never confirms (user 2026-09-29: a pair discard
   // taken by an extra Enter lost the lecture's transcript)
-  /* resolves true (ok), false (cancel, Esc, outside) or "extra" (a third button, only when `extra` is given) */
+  /* resolves true (ok), false (cancel, Esc, outside) or "extra" (a third button, only when `extra` is given);
+     cancel: "" leaves the cancel button out (a notice with nothing to choose) */
   function dialog({ title, body, ok = "확인", cancel = "취소", tone = "primary", extra = "", check = null, checks = null }) {
     return new Promise((resolve) => {
       const scrim = document.createElement("div");
@@ -55,7 +58,7 @@
       const boxes = checks || (check ? [check] : []);
       const box = boxes.map((c) => `<label class="dlg-check"><input type="checkbox"${c.value ? " checked" : ""}> ${esc(c.label)}</label>`).join("");
       scrim.innerHTML = `<div class="dialog" role="dialog"><h4>${esc(title)}</h4><p>${esc(body)}</p>${box}
-        <div class="acts">${extra ? `<button class="ghost" data-r="x">${esc(extra)}</button>` : ""}<button data-r="0">${esc(cancel)}</button><button class="${tone}" data-r="1">${esc(ok)}</button></div></div>`;
+        <div class="acts">${extra ? `<button class="ghost" data-r="x">${esc(extra)}</button>` : ""}${cancel ? `<button data-r="0">${esc(cancel)}</button>` : ""}<button class="${tone}" data-r="1">${esc(ok)}</button></div></div>`;
       const done = (r) => { scrim.querySelectorAll(".dlg-check input").forEach((el, i) => { boxes[i].value = el.checked; }); scrim.remove(); document.removeEventListener("keydown", key); resolve(r); };
       const key = (e) => {
         if (!isTop(scrim)) return;
@@ -162,13 +165,21 @@
   /* ---------- top bar ---------- */
   const courseName = (folder) => { const c = (ui.info.courses || []).find((x) => x.folder === folder); return c && c.name !== folder ? c.name : ""; };
   const mdText = (iso) => { const [, m, d] = iso.split("-"); return `${+m}/${+d}`; };
+  function placeLivePanel() {
+    const home = ui.view === "home", live = $("c-live");
+    const host = home ? document.querySelector(".body > .right") : $("livePane");
+    if (live.parentElement !== host) host.insertBefore(live, home ? $("todo") : $("c-html"));
+    live.classList.toggle("on", ui.view !== "lecture");
+  }
   function renderTop() {
     const info = ui.info, L = ui.view === "lecture" ? ui.lecture : null, home = ui.view === "home";
     document.body.classList.toggle("home-view", home);
+    // Reuse the actual live surface. The dock and its pickers stay in place.
+    placeLivePanel();
     $("body").classList.toggle("noside", home ? !ui.sideInHome : !!ui.sideHidden);
     $("homeBtn").classList.toggle("on", home);
     $("sideBtn").classList.toggle("on", !$("body").classList.contains("noside"));
-    sett($("rTitle"), home ? "오늘 할 일" : "전사");
+    sett($("rTitle"), home ? (liveOwnsPanel() ? "실시간 전사" : "오늘 할 일") : "전사");
     if (home) {
       setp($("title").firstChild, "nodeValue", "오늘 ");
       sett($("subtitle"), info.date);
@@ -201,10 +212,10 @@
     const E = ui.engines, q = ui.quota, info = ui.info.engines || {};
     const g = E ? E.google : { state: info.google, quota: q };
     const gq = g && g.quota;
-    const google = g && g.state === "ok" ? (gq && gq.ok ? `Google ${gq.remaining}/${gq.limit}` : "Google") : "Google 키 없음";
+    const google = g && g.state === "ok" ? (gq && gq.ok ? `Google 오늘 무료 ${gq.remaining}회 남음` : "Google") : "Google 키 없음";
     if (!E) return { text: google, bad: !(g && g.state === "ok") || (gq && gq.ok && gq.remaining === 0) };
     const w = E.whisper, m = E.mai;
-    const whisper = w.state === "ok" ? `Whisper ${hours(w.usage.day_left_s)} 남음` : "Whisper 키 없음";
+    const whisper = w.state === "ok" ? `Whisper 오늘 무료 ${Math.floor(w.usage.day_left_s / 60)}분 남음` : "Whisper 키 없음";
     const mai = m.state === "aside" || m.state === "agent" ? `MAI 오늘 ${m.usage.today_chunks}조각` : "MAI 수동";
     const bad = g.state !== "ok" || (gq && gq.ok && gq.remaining === 0) || (w.state === "ok" && w.usage.day_left_s <= 0);
     return { text: (ed("mai") ? [google, whisper, mai] : [google, whisper]).join(" · "), bad };
@@ -215,10 +226,10 @@
     const s = engineSummary(), E = ui.engines, info = ui.info.engines || {}, gq = E ? E.google.quota : ui.quota;
     const gOk = (E ? E.google.state : info.google) === "ok", wOk = (E ? E.whisper.state : info.whisper) === "ok";
     const left = (gOk && !(gq && gq.ok && gq.remaining === 0)) || (wOk && !(E && E.whisper.usage && E.whisper.usage.day_left_s <= 0));
-    const word = !gOk && !wOk ? "전사 연결 필요" : left ? "전사 준비됨" : "전사 한도 다 씀";
+    const word = !gOk && !wOk ? "전사 연결 필요" : left ? "무료 전사 준비됨" : "전사 한도 다 씀";
     const html = `<span><i class="dot ${left ? "ok" : "wait"}"></i>${esc(word)}</span>`;
     if ($("engines").dataset.h !== html) { $("engines").innerHTML = html; $("engines").dataset.h = html; }
-    setp($("engines"), "title", `전사(녹음을 글로 바꾸기) 서비스 상태: ${s.text} — 누르면 남은 양을 자세히 봅니다`);
+    setp($("engines"), "title", `Groq(Whisper)·Google(Gemini) 무료 사용 한도 안에서 전사합니다: ${s.text} — 누르면 남은 양을 자세히 봅니다`);
   }
   async function loadEngines() {
     try {
@@ -234,13 +245,13 @@
     const w = E.whisper, m = E.mai, u = w.usage || {}, mu = m.usage || {};
     const google = E.google.state === "ok" ? quotaTitle() : "API 키가 없습니다";
     const whisper = w.state === "ok"
-      ? [`오늘(24시간) 남은 오디오 ${hours(u.day_left_s)} / ${hours(u.day_limit_s)}`, `최근 1시간 남은 오디오 ${Math.floor((u.hour_left_s || 0) / 60)}분 / ${Math.floor((u.hour_limit_s || 0) / 60)}분`, u.basis || ""].join("\n")
+      ? [`오늘 무료 한도 ${Math.floor(u.day_left_s / 60)}분 남음 (최근 24시간)`, `최근 1시간 남은 오디오 ${Math.floor((u.hour_left_s || 0) / 60)}분 / ${Math.floor((u.hour_limit_s || 0) / 60)}분`, u.basis || ""].join("\n")
       : "Groq API 키(GROQ_API_KEY)가 없습니다";
     const mai = m.state === "aside" || m.state === "agent"
       ? [`오늘 가져온 조각 ${mu.today_chunks}개 · 거절 ${mu.today_rejections}번`, `막히지 않았던 관찰값: 하루 ${mu.observed_ok_per_day}조각`, mu.basis || ""].join("\n")
       : "Aside CLI·Claude Code를 찾지 못해 수동으로만 올릴 수 있습니다";
-    return [["Google", E.google.note, google], ["Whisper (Groq)", w.note, whisper], ["MAI", m.note, mai]]
-      .map(([t, note, body]) => `<div class="ep"><b>${esc(t)}</b><small>${esc(note || "")}</small><pre>${esc(body)}</pre></div>`).join("") +
+    return `<div class="ep"><small>Groq(Whisper)와 Google(Gemini)는 무료 사용 한도 안에서 씁니다. 이 앱이 센 양이며, 다른 앱에서 쓴 양은 포함하지 않습니다.</small></div>` + [["Google", E.google.note, google], ["Whisper (Groq)", w.note, whisper], ["MAI", m.note, mai]]
+      .filter(([t]) => t !== "MAI" || ed("mai")).map(([t, note, body]) => `<div class="ep"><b>${esc(t)}</b><small>${esc(note || "")}</small><pre>${esc(body)}</pre></div>`).join("") +
       (E.recording ? `<div class="ep-rec">녹음 중: Google 새 시작·MAI는 녹음이 끝난 뒤, Whisper는 녹음 중에도 보냅니다</div>` : "");
   }
   function openEnginePop() {
@@ -295,7 +306,7 @@
       return `<div class="er"><span class="en">${name} ${rec.duration_ms ? clock(rec.duration_ms) : ""}</span>${sel}${cells}</div>`;
     }));
     if (!(ui.view === "lecture" && ui.lecture && ui.lecture.id === id)) return;  // moved on meanwhile
-    const html = rows.join("");
+    const html = rows.join("") + (rows.length ? `<small>Groq(Whisper)·Google(Gemini)는 무료 사용 한도 안에서 씁니다. ${esc(engineSummary().text)} · 이 앱이 보낸 양 기준</small>` : "");
     box.style.display = html ? "" : "none";
     if (box.dataset.h !== html) { box.innerHTML = html; box.dataset.h = html; }
   }
@@ -343,7 +354,7 @@
     const btn = $("capBtn"), running = !!(s && s.running);
     btn.classList.toggle("on", running);
     cap.paused = !!(s && s.paused);
-    btn.textContent = running ? `자막 ${cap.paused ? "⏸" : "●"} ${clock((s.elapsed_s || 0) * 1000)}` : "자막";
+    btn.innerHTML = running ? `자막 ${cap.paused ? ic("pause") : '<i class="live-dot"></i>'} ${clock((s.elapsed_s || 0) * 1000)}` : "자막";
     if (s) cap.status = s;
     renderLive();
     if (!cap.shown || !s) return;
@@ -383,7 +394,7 @@
   const store = { get(k, d) { try { const v = localStorage.getItem(k); return v === null ? d : JSON.parse(v); } catch (err) { return d; } },
     set(k, v) { try { localStorage.setItem(k, JSON.stringify(v)); } catch (err) { /* private window: this run only */ } } };
   const liveReady = () => ((ui.info && ui.info.features) || {}).captions?.state === "ready";
-  const liveWanted = () => store.get(LIVE_KEY, true) !== false;
+  const liveWanted = () => store.get(LIVE_KEY, false) === true;  // off until the box is ticked (user 2026-11-24)
   const liveDeclined = (course) => (store.get(LIVE_DECLINED, []) || []).includes(course || "");
   function liveSource() { const m = recMode(); return m.mode === "loopback" ? "pc" : "mic"; }
   /* consent first (the native window stores a course's yes), then start; false when nothing started */
@@ -438,7 +449,19 @@
   function renderLive() {
     renderSideLive();
     const head = $("liveHead"), body = $("liveBody");
-    if (!head || ui.view === "lecture" || ui.view === "home") return;
+    if (!head || ui.view === "lecture") return;
+    const day = ui.view === "home" && !liveOwnsPanel();
+    $("c-live").classList.toggle("day-view", day);
+    if (ui.view === "home") sett($("rTitle"), day ? "오늘 할 일" : "실시간 전사");
+    if (day) {
+      const r = ui.dayData, h = `<b>오늘 <span class="num">${esc(r?.date || ui.info.today_iso || "")}</span></b>`;
+      const html = dayList(r);
+      if (head.dataset.h !== h) { head.innerHTML = h; head.dataset.h = h; }
+      if (body.dataset.dayHtml !== html || cap.liveHtml !== null) { body.innerHTML = html; body.dataset.dayHtml = html; }
+      cap.liveHtml = null; body.classList.remove("masked-live");
+      return;
+    }
+    body.dataset.dayHtml = "";
     const s = cap.status || {}, st = ui.state || {}, recording = ["starting", "recording", "stopping"].includes(st.phase);
     const running = !!s.running, course = capCourse();
     let line = "", acts = "";
@@ -448,7 +471,7 @@
       acts = `<button class="ghost" data-live="pause"${s.state === "finishing" ? " disabled" : ""}>${cap.paused ? "이어하기" : "일시중단"}</button><button class="ghost" data-live="stop"${s.state === "finishing" ? " disabled" : ""}>끄기</button>` +
         (s.file ? `<button class="ghost" data-live="file" title="자막 파일이 있는 폴더">파일</button>` : "");
     } else if (!liveReady()) {
-      line = `<i class="dot"></i>실시간 전사는 꺼져 있습니다 — 설정 › 계정 연결에서 Gemini 키를 연결하면 녹음과 함께 켜집니다.`;
+      line = `<i class="dot"></i>실시간 전사는 꺼져 있습니다 — 설정 › 연결 › 계정 연결에서 Gemini 키를 연결하면 켤 수 있습니다.`;
       acts = `<button class="ghost" data-live="settings">설정 열기</button>`;
     } else if (cap.error) {
       line = `<i class="dot warn"></i>${esc(cap.error)}`;
@@ -462,7 +485,7 @@
     } else if (recording) {
       line = `<i class="dot wait"></i>실시간 전사를 켜는 중…`;
     } else {
-      line = `<i class="dot"></i>녹음을 시작하면 수업에서 하는 말이 여기에 바로 글로 나옵니다(엔진은 설정 › AI 엔진 › 실시간 전사).`;
+      line = `<i class="dot"></i>${liveWanted() ? "녹음을 시작하면" : "녹음 중에 [지금 켜기]를 누르면"} 수업에서 하는 말이 여기에 바로 글로 나옵니다(엔진은 설정 › 녹음·전사 › 실시간 전사 엔진).`;
       acts = `<label class="live-auto"><input type="checkbox" data-live="auto"${liveWanted() ? " checked" : ""}> 녹음과 함께 켜기</label>`;
     }
     const headHtml = `<div class="live-line">${line}</div><div class="live-acts">${acts}</div>`;
@@ -480,7 +503,7 @@
   }
   async function liveAction(el) {
     const act = el.dataset.live;
-    if (act === "settings") openSettings();
+    if (act === "settings") openSettings("connect");
     else if (act === "start") { el.disabled = true; await startLive(false); el.disabled = false; }
     else if (act === "stop") { cap.auto = false; await api.captions_stop(); toast("마지막 조각까지 적고 끕니다"); pollCaptions(); }
     else if (act === "pause") { const r = await api.captions_pause(!cap.paused); if (!r.ok) toast(r.reason); pollCaptions(); }
@@ -587,7 +610,7 @@
       qa.last = ""; qa.heard = ""; qa.fromHtml = ""; qa.deck = "";  // a new (re-opened) panel is empty: draw everything again
       p.innerHTML = `<header><b>질의응답 도우미</b><span id="qaInfo"></span><span class="sp"></span><button class="ghost" id="qaEnd" title="도우미를 끕니다">끝내기</button><button class="ghost" id="qaClose" title="패널만 숨깁니다 — 도우미는 켜진 채로, [질의응답]을 누르면 다시 보입니다">숨기기</button></header>
         <div class="qa-deck" id="qaDeck" hidden><div class="qa-slide"><img id="qaSlide" alt=""><p class="hint" id="qaSlideNote"></p></div>
-          <div class="qa-deck-bar"><button class="ghost" id="qaPrev" title="이전 슬라이드 (← · PageUp)">◀</button><span id="qaPage"></span><input id="qaGo" inputmode="numeric" placeholder="번호" title="슬라이드 번호로 가기 (Enter)"><button class="ghost" id="qaNext" title="다음 슬라이드 (→ · PageDown)">▶</button></div></div>
+          <div class="qa-deck-bar"><button class="ghost" id="qaPrev" title="이전 슬라이드 (← · PageUp)" aria-label="이전 슬라이드">${ic("left")}</button><span id="qaPage"></span><input id="qaGo" inputmode="numeric" placeholder="번호" title="슬라이드 번호로 가기 (Enter)"><button class="ghost" id="qaNext" title="다음 슬라이드 (→ · PageDown)" aria-label="다음 슬라이드">${ic("right")}</button></div></div>
         <div class="qa-fromrow" id="qaFrom"></div><div class="qa-heard" id="qaHeard"></div>
         <div class="qa-row"><button class="ghost qa-mark" id="qaMark" title="지금부터 하는 말을 질문으로 (F7) — 위의 자막 줄을 눌러 그 줄부터로 고를 수도 있습니다">질문 시작 <small>F7</small></button><button class="primary qa-ask" id="qaAsk">HELP <small>F8</small></button>
           <form class="qa-type" id="qaTypeForm"><input id="qaType" placeholder="질문을 직접 쳐도 됩니다 — Enter" autocomplete="off"><button class="ghost">보내기</button></form></div>
@@ -614,7 +637,11 @@
       p.querySelector("#qaNext").onclick = () => qaSlide(qa.page + 1);
       p.querySelector("#qaGo").onkeydown = (e) => { if (e.key === "Enter") { qaSlide(parseInt(e.target.value, 10) || qa.page); e.target.value = ""; e.target.blur(); } };
       p.querySelector("#qaCards").onclick = (e) => { const t = e.target.closest("[data-slide]"); if (t) qaSlide(+t.dataset.slide); };
-      p.querySelector("#qaEnd").onclick = async () => { await api.qa_stop(); toast("질의응답 도우미를 끕니다"); };
+      p.querySelector("#qaEnd").onclick = async () => {  // ends the helper (and captions it started) and closes the panel
+        const r = await api.qa_stop();
+        p.remove(); qa.shown = false;
+        toast(r && r.captions_stopped ? "질의응답 도우미와 자막을 끕니다" : "질의응답 도우미를 끕니다");
+      };
       p.querySelector("#qaClose").onclick = () => { p.remove(); qa.shown = false; };
     }
     qa.shown = true;
@@ -656,7 +683,7 @@
     return (list || []).map((x) => `<div class="qa-prep"><p class="qa-q">준비한 답 · ${esc(x.id)} · ${esc(x.q)}${x.asked ? " · 실제로 받은 질문" : ""}` +
       `${x.via === "claude" ? ` <span class="qa-via" title="Claude가 질문의 뜻을 보고 고른 예상 질문">Claude가 고름</span>` : ""}</p>` +
       `<p class="qa-a">${esc(x.answer)}</p>${(x.basis || []).slice(0, 2).map(why).join("")}` +
-      `${x.caution ? `<p class="qa-warn">⚠ ${esc(x.caution)}</p>` : ""}</div>`).join("");
+      `${x.caution ? `<p class="qa-warn">${ic("alert")} ${esc(x.caution)}</p>` : ""}</div>`).join("");
   }
   function qaCard(c) {
     if (c.error && !c.answer && !(c.prepared || []).length) return `<div class="qa-card err">${esc(c.error)}</div>`;
@@ -668,7 +695,7 @@
       const t = l.trim();
       if (/^질문\s*:/.test(t)) { question = t.replace(/^질문\s*:\s*/, ""); return ""; }
       if (/^답\s*:/.test(t)) { answered = true; return `<p class="qa-a">${esc(t.replace(/^답\s*:\s*/, ""))}</p>`; }
-      if (/^주의\s*:/.test(t)) return `<p class="qa-warn">⚠ ${esc(t.replace(/^주의\s*:\s*/, ""))}</p>`;
+      if (/^주의\s*:/.test(t)) return `<p class="qa-warn">${ic("alert")} ${esc(t.replace(/^주의\s*:\s*/, ""))}</p>`;
       if (/^근거\s*:?\s*$/.test(t)) return "";
       return why(t.replace(/^[-•]\s*/, ""));
     }).join("");
@@ -682,7 +709,7 @@
     if (s && s.state === "unknown") return;  // status file unreadable for a moment: keep what is on screen
     const btn = $("qaBtn"), running = !!(s && s.running);
     btn.classList.toggle("on", running);
-    btn.textContent = running ? (s.state === "loading" ? "질의응답 ● 준비 중" : "질의응답 ●") : "질의응답";
+    btn.innerHTML = running ? (s.state === "loading" ? '질의응답 <i class="live-dot"></i> 준비 중' : '질의응답 <i class="live-dot"></i>') : "질의응답";
     if (!qa.shown || !s) return;
     const p = qaPanel(), capt = s.captions || {};
     const deck = (s.pack && s.pack.deck) || "";
@@ -700,7 +727,7 @@
     p.querySelector("#qaAsk").disabled = !running || s.state !== "ready";
     qa.now = capt.running && capt.now != null ? capt.now : null; qa.polled = Date.now();
     const from = qa.from;  // the chosen question start (P-051): lines from there are marked
-    const fromHtml = from != null ? `질문 시작 ${mmss(from)} — 이 뒤의 말로 답합니다 <a data-clear="1" title="시작점 지우기">✕</a>` : "";
+    const fromHtml = from != null ? `질문 시작 ${mmss(from)} — 이 뒤의 말로 답합니다 <a data-clear="1" title="시작점 지우기" aria-label="시작점 지우기">${ic("x")}</a>` : "";
     if (fromHtml !== qa.fromHtml) { p.querySelector("#qaFrom").innerHTML = fromHtml; qa.fromHtml = fromHtml; }  // outside the scroll box: always seen
     p.classList.toggle("has-from", from != null);
     const heard = (capt.recent || []).slice(-6).map((l) => `<p class="qa-line${from != null && l.at >= from ? " sel" : ""}" data-at="${l.at}" title="이 줄부터를 질문으로"><small>${mmss(l.at)}</small>${esc(l.text)}</p>`).join("") +
@@ -791,7 +818,7 @@
     if (!q) return "Google 전사 한도 확인 중";
     if (!q.ok) return "Google 전사 한도를 읽지 못함: " + (q.error || "");
     const perLecture = Math.ceil(110 * 60 / (q.chunk_s || 1200));
-    const lines = [`오늘 남은 Google 전사 요청: ${q.remaining}회 (하루 ${q.limit}회)`,
+    const lines = [`오늘 무료 Google 전사 요청: ${q.remaining}회 (하루 ${q.limit}회)`,
       `요청 1회 = ${Math.round((q.chunk_s || 1200) / 60)}분 조각 1개 · 110분 수업 ≈ ${perLecture}회 → 수업 약 ${Math.floor(q.remaining / perLecture)}개분`,
       `Google 기준(태평양 날짜) 오늘 ${q.used}회 사용 · ${hm(q.provider_reset_at)}에 다시 채워짐`,
       `내 예산(한국 날짜) 하루 ${q.personal_budget}회 중 ${q.used_personal}회 사용 · ${hm(q.personal_reset_at)}에 초기화`,
@@ -822,7 +849,7 @@
       if (!open.has(f)) return html;
       let sub = extraSet.has(f) ? "" : `<div class="item sub files" data-files="${esc(f)}"><svg><use href="#i-folder"/></svg>자료</div>`;
       if (slot && !todayL) sub += `<div class="item sub" data-course="${esc(f)}"><span class="d num">오늘</span>${esc(slot.start)} 수업 · 녹음 전</div>`;
-      sub += items.map((it) => `<div class="item sub${it.id === selected ? " sel" : ""}" data-lecture="${it.id}"><span class="d num">${it.date === todayIso ? "오늘" : mdText(it.date)}</span>${esc(it.label)}<span class="meta">${it.reviewable ? "✓" : ""}</span></div>`).join("");
+      sub += items.map((it) => `<div class="item sub${it.id === selected ? " sel" : ""}" data-lecture="${it.id}"><span class="d num">${it.date === todayIso ? "오늘" : mdText(it.date)}</span>${esc(it.label)}<span class="meta">${it.reviewable ? ic("tick") : ""}</span></div>`).join("");
       return html + `<div class="subs">${sub || `<div class="item sub dim">회차 없음</div>`}</div>`;
     };
     let html = folders.filter((f) => !extraSet.has(f)).map(row).join("") +
@@ -834,9 +861,9 @@
   }
 
   /* ---------- start screen: this month's calendar + today's to-do (user 2026-09-29: "C안처럼") ---------- */
-  function dayAttrs(iso, today, count) {
+  function dayAttrs(iso, today, count, tabStop) {
     const [y, m, d] = iso.split("-").map(Number), wd = "일월화수목금토"[new Date(y, m - 1, d).getDay()];
-    const stop = today && today.slice(0, 7) === iso.slice(0, 7) ? iso === today : d === 1;
+    const stop = tabStop !== undefined ? tabStop : today && today.slice(0, 7) === iso.slice(0, 7) ? iso === today : d === 1;
     return ` role="button" tabindex="${stop ? 0 : -1}" aria-label="${m}월 ${d}일 ${wd}요일${iso === today ? ", 오늘" : ""}${count ? `, 일정 ${count}개` : ""}"`;
   }
   document.addEventListener("keydown", (e) => {
@@ -847,25 +874,211 @@
     if (!next) return;
     e.preventDefault(); all.forEach((x) => { x.tabIndex = -1; }); next.tabIndex = 0; next.focus();
   });
-  async function renderHome() {
-    const now = new Date(), H = ui.home || (ui.home = { year: now.getFullYear(), month: now.getMonth() + 1 });
-    const [r, board] = await Promise.all([api.calendar(H.year, H.month), api.etl_board()]);
-    showExamChip(r);  // next_exam does not depend on the month shown: no second calendar call
+  const isoOf = (d) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+  function homeToday() {
+    const t = ui.info && ui.info.today_iso ? ui.info.today_iso.split("-").map(Number) : null, now = new Date();
+    return t ? new Date(t[0], t[1] - 1, t[2]) : new Date(now.getFullYear(), now.getMonth(), now.getDate());
+  }
+  /* D-081 (2026-11-25): the week has its own card; this calendar pages full months. */
+  async function homeCalendar(H) {
+    return api.calendar(H.year, H.month);
+  }
+  /* eTL submission state on a calendar row (D-077): handed-in rows never reach the grid (the backend lists them under
+     "submitted"); a missing one is drawn red as 누락 */
+  // a missing one is red only on the day its due passed; from the next day it is an ordinary past item (lapsed)
+  const evMissing = (e) => !!(e.submission && e.submission.state === "missing" && !e.submission.lapsed);
+  const evClass = (e) => `ev k-${e.kind}${e.source === "etl" ? " etl" : ""}${evMissing(e) ? " missing" : ""}`;
+  const evLabel = (e) => evMissing(e) ? "누락" : e.kind_label;
+  // "N시간 전에 받은 정보": how old the stored eTL lists are, where assignments are shown (works offline)
+  function agoText(s) {
+    const m = Math.round((Date.now() / 1000 - s) / 60);
+    return m < 1 ? "방금" : m < 60 ? `${m}분 전` : m < 1440 ? `${Math.round(m / 60)}시간 전` : `${Math.round(m / 1440)}일 전`;
+  }
+  const etlAge = (r) => r && r.etl_at ? `eTL ${agoText(r.etl_at)}에 받은 정보` : "";
+  // a handed-in assignment, for the folded "제출함 N건" list
+  const submittedRow = (e, attr) => `<div class="td sub" ${attr}="${esc(e.id)}" data-date="${esc(e.date)}"><span class="dd">${esc(mdText(e.date))}</span>` +
+    `<span class="what">${e.course ? esc(e.course) + " · " : ""}${esc(e.title)}<small>${esc((e.submission && e.submission.label) || "제출함")}` +
+    `${e.submission && e.submission.late ? ` · <b class="late">늦게 냄</b>` : ""}${e.submission && e.submission.submitted_at ? ` · ${esc(e.submission.submitted_at.slice(5).replace("-", "/").replace("T", " "))} 냄` : ""}</small></span></div>`;
+  const missingRow = (m) => `<div class="td miss" data-cands="1"><span class="dd missing">누락</span>` +
+    `<span class="what">${m.course ? esc(m.course) + " · " : ""}${esc(m.title)}<small>${m.due ? esc(mdText(m.due.slice(0, 10))) + " " + esc(m.due.slice(11, 16)) + " 마감 · " : ""}eTL에서 아직 안 냄</small></span></div>`;
+  function openToday(folder) {
+    // A class of today that has not been recorded yet: keep an active recording's selection.
+    const st = ui.state || {};
+    if (!["starting", "recording", "stopping", "finalizing"].includes(st.phase)) {
+      ui.course = folder; ui.courseSource = "user_pick"; syncSelection();
+    }
+    ui.view = "live"; setHtmlSize("pane");
+    renderCenter(); renderAll();
+  }
+  // D-081: week and day are simultaneous; old lh.todayView preferences are ignored.
+  function todayHeader(r) {
+    return `<div class="today-head"><h3>주간 시간표 <small>${esc(r?.start ? `${r.start.slice(5).replace("-", "/")} – ${r.end.slice(5).replace("-", "/")}` : "")}</small></h3>` +
+      `<div class="today-tools"><span class="seg home-mode" role="group" aria-label="주간·월간"><button data-home-mode="week">주간</button><button data-home-mode="month">월간</button></span><button data-week-step="-1" title="이전 주" aria-label="이전 주">${ic("left")}</button><button data-week-step="0" title="이번 주로 돌아가기">이번 주</button><button data-week-step="1" title="다음 주" aria-label="다음 주">${ic("right")}</button></div></div>`;
+  }
+  // A course keeps its colour across days, weeks, redraws and restarts. Ink stays
+  // on the app's theme tokens; the fixed palette supplies a translucent tint.
+  // Each course gets the next unused palette colour the first time it is drawn (a hash of the name made
+  // similar names share one colour, user 2026-11-25); the choice is remembered in localStorage.
+  function weekColour(course) {
+    const palette = ["66,132,170", "196,112,54", "76,135,92", "153,101,149", "190,92,104", "52,150,148",
+      "168,140,40", "104,112,196", "140,96,64", "112,150,60", "196,98,160", "88,128,128"];
+    const name = String(course || "");
+    if (!name) return "128,128,128";
+    if (!weekColour.map) {
+      weekColour.map = {};
+      try { const saved = JSON.parse(localStorage.getItem("lh.courseColours") || "{}"); if (saved && typeof saved === "object") weekColour.map = saved; } catch (err) { /* no storage: this run only */ }
+    }
+    const map = weekColour.map;
+    if (!(Number.isInteger(map[name]) && map[name] >= 0 && map[name] < palette.length)) {
+      const used = new Set(Object.values(map)), free = palette.findIndex((_c, i) => !used.has(i));
+      map[name] = free >= 0 ? free : Object.keys(map).length % palette.length;
+      try { localStorage.setItem("lh.courseColours", JSON.stringify(map)); } catch (err) { /* no storage */ }
+    }
+    return palette[map[name]];
+  }
+  function weekGrid(r) {
+    // one hour is 40px: a 75-minute class (50px) holds its name, its 휴강/보강 label and its time without the text
+    // spilling out of the block (it was 24px, user 2026-11-26); app.css drops lines that still do not fit
+    const WEEK_HOUR_PX = 40;
+    if (!r || !r.ok) return `<p class="hint">이번 주 일정을 불러오지 못했습니다.</p>`;
+    const span = r.end_ms - r.start_ms, pct = (ms) => (ms - r.start_ms) / span * 100;
+    const clock = (ms) => ms === 86400000 ? "24:00" : hhmm(ms);
+    const ticks = [];
+    for (let t = r.start_ms; t <= r.end_ms; t += 3600000) ticks.push(t);
+    const days = r.days || [], heads = days.map((d) => {
+      const when = new Date(`${d.date}T12:00:00`), label = `${"일월화수목금토"[when.getDay()]} ${Number(d.date.slice(8))}`;
+      const chips = (d.items || []).map((e) => {
+        const time = e.timed ? e.at.slice(11, 16) : "시각 미정", kind = ({ exam: "시험", quiz: "퀴즈", assignment: "마감", report: "마감", presentation: "마감" })[e.kind] || "일정";
+        const full = `${e.course ? e.course + " · " : ""}${e.title} · ${kind} ${time}`;
+        return `<button class="week-chip ${["exam", "quiz"].includes(e.kind) ? "exam" : "due"}" style="--course-rgb:${weekColour(e.course)}" data-day="${esc(d.date)}" title="${esc(full)}"><span>${esc(e.title)}</span><small>${esc(kind)} ${esc(time)}</small></button>`;
+      }).join("");
+      return `<div class="week-day-head${d.date === r.date ? " is-today" : ""}"><b>${esc(label)}${d.date === r.date ? " · 오늘" : ""}</b>${chips}</div>`;
+    }).join("");
+    const columns = days.map((d) => {
+      // Put simultaneous classes beside one another, sharing a lane count only
+      // within their overlapping group; ordinary classes keep the full width.
+      const classes = [...(d.classes || [])].filter((c) => c.end_ms > c.start_ms).sort((a, b) => a.start_ms - b.start_ms);
+      const placed = []; let group = [], ends = [], until = -1;
+      const flush = () => { group.forEach((p) => placed.push({ ...p, lanes: ends.length })); group = []; ends = []; };
+      classes.forEach((c) => {
+        if (c.start_ms >= until) flush();
+        let lane = ends.findIndex((end) => end <= c.start_ms); if (lane < 0) lane = ends.length;
+        ends[lane] = c.end_ms; group.push({ c, lane }); until = Math.max(c.end_ms, group.length === 1 ? c.end_ms : until);
+      }); flush();
+      const blocks = placed.map(({ c, lane, lanes }) => {
+        const changed = ["보강", "시간변경", "대체"].includes(c.kind), cancelled = c.kind === "휴강";
+        const time = `${clock(c.start_ms)}–${clock(c.end_ms)}`, title = `${c.course} · ${time}${c.room ? " · " + c.room : ""} · ${c.kind || "정규"}${c.note ? " · " + c.note : ""}`;
+        return `<button class="week-class${cancelled ? " cancelled" : ""}${changed ? " changed" : ""}" data-course="${esc(c.course)}" title="${esc(title)}" style="--course-rgb:${weekColour(c.course)};top:${pct(c.start_ms)}%;height:${(c.end_ms - c.start_ms) / span * 100}%;left:${lane / lanes * 100}%;width:${100 / lanes}%">` +
+          `<strong>${esc(c.course)}</strong>${cancelled || changed ? `<span class="week-kind">${esc(c.kind)}${c.room ? ` · ${esc(c.room)}` : ""}</span>` : ""}<small class="week-time">${esc(time)}</small>${c.room && !(cancelled || changed) ? `<small class="week-room">${esc(c.room)}</small>` : ""}</button>`;
+      }).join("");
+      const now = d.date === r.date && r.now_ms >= r.start_ms && r.now_ms < r.end_ms ? `<div class="week-now" style="top:${pct(r.now_ms)}%" title="현재 ${esc(clock(r.now_ms))}"></div>` : "";
+      return `<div class="week-day${d.date === r.date ? " is-today" : ""}" data-week-day="${esc(d.date)}">${ticks.map((t) => `<i class="week-rule" style="top:${pct(t)}%"></i>`).join("")}${blocks}${now}</div>`;
+    }).join("");
+    return `<div class="week-scroll"><div class="week-grid" data-hours="${span / 3600000}" style="--week-days:${days.length};--week-height:${Math.max(200, span / 3600000 * WEEK_HOUR_PX)}px"><div class="week-corner">시간</div>${heads}<div class="week-axis">${ticks.map((t) => `<span style="top:${pct(t)}%">${esc(clock(t))}</span>`).join("")}</div>${columns}</div>` +
+      (days.every((d) => !d.classes.length) ? `<p class="hint week-empty">이 주에는 등록된 수업이 없습니다.</p>` : "") + `</div>`;
+  }
+  function todayCard(r) {
+    return todayHeader(r) + weekGrid(r);
+  }
+  function liveOwnsPanel() {
+    const s = cap.status || {};
+    return ["starting", "recording", "stopping", "finalizing"].includes((ui.state || {}).phase) || !!s.running || !!s.interim || !!s.lines?.length;
+  }
+  function dayList(r) {
+    if (!r?.ok) return `<p class="hint">${r ? "오늘 일정을 불러오지 못했습니다." : "오늘 일정을 불러오는 중…"}</p>`;
+    const classes = [...(r.classes || [])].sort((a, b) => a.start_ms - b.start_ms);
+    const dues = [...(r.dues || [])].sort((a, b) => a.at.localeCompare(b.at));
+    const exams = [...(r.exams || [])].sort((a, b) => a.at.localeCompare(b.at));
+    if (!classes.length && !dues.length && !exams.length) return `<p class="day-empty">오늘은 여유로운 하루예요. 잠시 쉬어 가세요.</p>`;
+    const colour = (c) => `style="--course-rgb:${weekColour(c)}"`;
+    const clock = (ms) => ms === 86400000 ? "24:00" : hhmm(ms);
+    const rows = classes.map((c) => `<button class="day-row${c.kind === "휴강" ? " cancelled" : ""}" ${colour(c.course)} data-course="${esc(c.course)}"><span class="day-time num">${clock(c.start_ms)}–${clock(c.end_ms)}</span><span class="day-what"><strong>${esc(c.course)}</strong>${c.kind !== "정규" ? `<small class="day-chip">${esc(c.kind)}</small>` : ""}</span></button>`).join("");
+    const event = (e, exam) => {
+      const at = new Date(e.at), left = Math.max(0, Math.floor((at - new Date(r.now || Date.now())) / 60000));
+      const days = Math.floor((Date.parse(e.at.slice(0, 10) + "T00:00:00Z") - Date.parse(r.date + "T00:00:00Z")) / 86400000);
+      const badge = exam ? (days === 0 ? "D-day" : `D-${days}`) : left < 60 ? `${left}분 남음` : `${Math.floor(left / 60)}시간 ${left % 60}분 남음`;
+      return `<button class="day-row" ${colour(e.course)} data-day="${esc(e.at.slice(0, 10))}"><span class="day-chip num">${badge}</span><span class="day-what"><strong>${esc(e.title)}</strong><small>${esc(e.course || "일정")} · ${esc(e.at.slice(5, 10).replace("-", "/"))} ${e.timed ? esc(e.at.slice(11, 16)) : "시각 미정"}</small></span></button>`;
+    };
+    return `<section><h4>수업 ${classes.length}개</h4>${rows || `<p class="hint">오늘은 수업이 없습니다</p>`}</section>` +
+      `<section><h4${dues.length ? ` class="urgent"` : ""}>D-DAY 마감</h4>${dues.map((e) => event(e, false)).join("") || `<p class="hint">남은 마감이 없습니다</p>`}</section>` +
+      `<section><h4>7일 내 시험·퀴즈</h4>${exams.map((e) => event(e, true)).join("") || `<p class="hint">예정된 시험이 없습니다</p>`}</section>`;
+  }
+  /* The whole week's hour range is shown without scrolling when the card has room for it: between 30px (a 75-minute
+     class still holds its name and time) and 44px an hour; only a longer day scrolls inside the card. */
+  function fitWeek() {
+    const card = $("todayCard"), scroll = card && card.querySelector ? card.querySelector(".week-scroll") : null;
+    const grid = scroll && scroll.querySelector(".week-grid");
+    if (!grid || !scroll.clientHeight) return;
+    const hours = Number(grid.dataset.hours) || 0, head = grid.querySelector(".week-day-head");
+    if (!hours) return;
+    const room = scroll.clientHeight - (head ? head.offsetHeight : 0) - 16;
+    const px = Math.max(30, Math.min(44, room / hours));
+    grid.style.setProperty("--week-height", `${Math.max(180, Math.round(hours * px))}px`);
+  }
+  if (typeof window !== "undefined" && window.addEventListener) window.addEventListener("resize", () => { try { fitWeek(); } catch (err) { /* layout only */ } });
+  async function refreshTodayCard() {
     if (ui.view !== "home") return;
+    const request = ui.todayRequest = (ui.todayRequest || 0) + 1;
+    // Independent, read-only calls; neither is awaited by the recording path.
+    const [week, day] = await Promise.allSettled([api.week_view(ui.weekOffset || 0), api.today_briefing()]);
+    const r = week.status === "fulfilled" ? week.value : null;
+    if (ui.view !== "home" || request !== ui.todayRequest) return;
+    const el = $("todayCard");
+    el.classList.toggle("with-week", true);
+    ui.dayData = day.status === "fulfilled" ? day.value : { ok: false };
+    el.innerHTML = todayCard(r);
+    setHomeMode(ui.homeMode);
+    renderLive();
+    if (r && r.ok && r.date !== ui.info.today_iso) {
+      ui.info.today_iso = r.date; ui.home = null;
+      renderHome();
+    }
+  }
+  // Home, left side: one view at a time — the week (default on every start) or the month (user 2026-11-26).
+  function setHomeMode(mode) {
+    ui.homeMode = mode === "month" ? "month" : "week";
+    const home = $("home");
+    if (home && home.dataset) home.dataset.mode = ui.homeMode;
+    if (home && home.querySelectorAll) home.querySelectorAll("[data-home-mode]").forEach((b) => b.classList.toggle("on", b.dataset.homeMode === ui.homeMode));
+    if (ui.homeMode === "week") fitWeek();
+  }
+  async function todayCardClick(e) {
+    const t = e.target.closest("[data-home-mode],[data-week-step],[data-course],[data-day]"); if (!t) return;
+    const d = t.dataset;
+    if (d.homeMode) return setHomeMode(d.homeMode);
+    if (d.weekStep !== undefined) { ui.weekOffset = +d.weekStep === 0 ? 0 : (ui.weekOffset || 0) + Number(d.weekStep); return refreshTodayCard(); }
+    if (d.course) return openToday(d.course);
+    if (d.day) { const [y, m] = d.day.split("-").map(Number); return openCalendar(y, m, { day: d.day }); }
+  }
+  async function renderHome() {
+    const now = homeToday(), H = ui.home || (ui.home = { year: now.getFullYear(), month: now.getMonth() + 1 });
+    const request = ui.homeRequest = (ui.homeRequest || 0) + 1;
+    const [r, board] = await Promise.all([homeCalendar(H), api.etl_board(), refreshTodayCard()]);
+    if (ui.view !== "home" || request !== ui.homeRequest) return;
+    showExamChip(r);  // next_exam does not depend on the month shown: no second calendar call
     ui.homeData = r; ui.homeBoard = board.ok ? board : null;
+    $("homeWeek").hidden = H.year === now.getFullYear() && H.month === now.getMonth() + 1;
     $("homeTitle").textContent = `${H.year}년 ${H.month}월`;
-    if (!r.ok) { $("homeGrid").innerHTML = `<div class="hint">달력을 열 수 없습니다: ${esc(r.error)}</div>`; renderTodo(null); return; }
-    const first = new Date(H.year, H.month - 1, 1), days = new Date(H.year, H.month, 0).getDate(), lead = (first.getDay() + 6) % 7;
+    if (!r.ok) { $("homeGrid").innerHTML = `<div class="hint">달력을 열 수 없습니다: ${esc(r.error)}</div>`; $("homeCandidates").hidden = true; renderTodo(null); return; }
+    const first = new Date(H.year, H.month - 1, 1), lead = (first.getDay() + 6) % 7;
+    const days = [...Array(new Date(H.year, H.month, 0).getDate())].map((_, i) => new Date(H.year, H.month - 1, i + 1));
+    $("home").style.setProperty("--month-min", `${Math.ceil((lead + days.length) / 7) * 32 + 144}px`);
     const byDay = {}; r.events.forEach((e) => { (byDay[e.date] = byDay[e.date] || []).push(e); });
     const exc = {}; r.exceptions.forEach((e) => { (exc[e.date] = exc[e.date] || []).push(e); });
     let html = "월화수목금토일".split("").map((d) => `<div class="dow">${d}</div>`).join("") + "<div></div>".repeat(lead);
-    for (let d = 1; d <= days; d++) {
-      const iso = `${H.year}-${String(H.month).padStart(2, "0")}-${String(d).padStart(2, "0")}`, list = byDay[iso] || [];
-      const items = list.slice(0, 3).map((e) => `<div class="ev k-${e.kind}${e.source === "etl" ? " etl" : ""}" data-ev="${e.id}" title="${esc(e.title + (e.note ? " — " + e.note : ""))}">${e.course ? esc(e.course) + " " : ""}${esc(e.kind_label)}</div>`).join("");
-      const ex = (exc[iso] || []).map((e) => `<div class="ex" title="${esc(e.note)}">${esc(e.course)} ${esc(e.kind)}${e.confirmation === "confirmed_by_user" ? "" : "(추정)"}</div>`).join("");
-      html += `<div class="day${iso === r.today ? " today" : ""}" data-day="${iso}"${dayAttrs(iso, r.today, list.length)}><span class="n">${d}</span>${ex}${items}${list.length > 3 ? `<div class="more">+${list.length - 3}</div>` : ""}</div>`;
-    }
+    days.forEach((day, i) => {
+      const iso = isoOf(day), d = day.getDate(), list = byDay[iso] || [];
+      const label = `${d}`;
+      // a confirmed "휴강" is both a calendar event and a timetable exception: one line, the event (it opens)
+      const exceptions = (exc[iso] || []).filter((x) => !(x.kind === "휴강" && list.some((e) => e.kind === "closure" && e.course === x.course)));
+      const count = exceptions.length + list.length;
+      const items = list.map((e) => `<div class="${evClass(e)}" style="--course-rgb:${weekColour(e.course)}" data-ev="${e.id}" title="${esc(e.title + (evMissing(e) ? " — 누락(eTL에서 아직 안 냄)" : "") + (e.note ? " — " + e.note : ""))}">${e.course ? esc(e.course) + " " : ""}${esc(evLabel(e))}</div>`);
+      const ex = exceptions.map((e) => `<div class="ex" style="--course-rgb:${weekColour(e.course)}" title="${esc([e.course + " " + e.kind, e.confirmation === "confirmed_by_user" ? "" : "확인 전(추정)", e.note].filter(Boolean).join(" · "))}">${esc(e.course)} ${esc(e.kind)}</div>`);
+      html += `<div class="day${iso === r.today ? " today" : ""}${iso < r.today ? " past" : ""}" data-day="${iso}"${dayAttrs(iso, r.today, count)}><span class="n">${label}</span>${[...ex, ...items].slice(0, 3).join("")}${count > 3 ? `<div class="more" title="이 날짜의 일정 모두 보기">+${count - 3}</div>` : ""}</div>`;
+    });
     $("homeGrid").innerHTML = html;
+    $("homeCandidates").hidden = !(r.candidates || []).length;
+    $("homeCandidates").textContent = `확인할 일정 후보 ${(r.candidates || []).length}건`;
     renderTodo(r);
   }
 
@@ -882,14 +1095,18 @@
       return `<div class="td" ${L ? `data-lecture="${L.id}"` : `data-course="${esc(s.folder)}"`}><span class="when num">${esc(s.start)}</span><span class="what">${esc(s.folder)}</span><span class="st">${st}</span></div>`;
     }).join("");
     const soon = r ? r.upcoming.filter((e) => e.d_day >= 0 && e.d_day <= 21) : [];
-    const due = soon.map((e) => `<div class="td" data-ev="${e.id}" data-date="${e.date}"><span class="dd${e.d_day <= 2 ? " urgent" : ""}">${dday(e.d_day)}</span>` +
-      `<span class="what">${e.course ? esc(e.course) + " · " : ""}${esc(e.title)}<small>${mdText(e.date)}${e.start_ms !== null ? " " + hhmm(e.start_ms) : ""} · ${esc(e.kind_label)}</small></span>` +
-      (e.kind === "assignment" && ed("assignment") ? `<span class="hw-acts"><button class="mini" data-hw="${e.id}" title="과제 파일·작성요령·관련 수업 노트를 모아 Claude Code로 과제를 시작합니다">과제 준비</button><button class="mini" data-hwopen="${e.id}" title="모아 둔 과제 폴더 열기">폴더</button></span>` : "") + `</div>`).join("");
+    const due = soon.map((e) => `<div class="td" data-ev="${e.id}" data-date="${e.date}"><span class="dd${evMissing(e) ? " missing" : e.d_day <= 2 ? " urgent" : ""}">${evMissing(e) ? "누락" : dday(e.d_day)}</span>` +
+      `<span class="what">${e.course ? esc(e.course) + " · " : ""}${esc(e.title)}<small>${mdText(e.date)}${e.start_ms !== null ? " " + hhmm(e.start_ms) : ""} · ${esc(e.kind_label)}${e.by_ai_app ? " · AI 앱이 넣음" : ""}${e.submission && e.submission.late ? ` · <b class="late">늦음</b>` : ""}${e.submission && e.submission.state === "graded" ? " · " + esc(e.submission.label) : ""}</small></span></div>`).join("");
+    // eTL (D-077): missing assignments first in red, handed-in ones folded away, and how old the eTL lists are
+    const missing = (r && r.missing || []).slice(0, 5).map(missingRow).join("");
+    const done = r && r.submitted || [];
+    const handed = done.length ? fold("todo-submitted", "제출함", done.map((e) => submittedRow(e, "data-ev")).join(""), { count: `${done.length}건`, cls: "sub-fold" }) : "";
+    const age = etlAge(r);
     const holds = side ? side.holds : 0, cands = r ? r.candidates.length : 0;
     const checks = (holds ? `<div class="td" data-inbox="1"><span class="dd">${holds}건</span><span class="what">확인함 — 어느 수업 것인지 골라 줄 녹음·파일</span></div>` : "") +
-      (cands ? `<div class="td" data-cands="1"><span class="dd">${cands}건</span><span class="what">달력 후보 — 수업 중 언급된 날짜</span></div>` : "") + etlTodo();
+      (cands ? `<div class="td" data-cands="1"><span class="dd">${cands}건</span><span class="what">달력 후보 — 수업 중 언급·게시판 글·eTL 공지의 날짜</span></div>` : "") + etlTodo();
     $("todo").innerHTML = `<div class="sl">오늘 수업</div>${classes || `<div class="none">오늘은 수업이 없습니다</div>`}` +
-      `<div class="sl">마감·시험 (3주 안)</div>${due || `<div class="none">3주 안에 잡힌 일정이 없습니다</div>`}` +
+      `<div class="sl">마감·시험 (3주 안)${age ? ` <small class="age">${esc(age)}</small>` : ""}</div>${missing}${due || (missing ? "" : `<div class="none">3주 안에 잡힌 일정이 없습니다</div>`)}${handed}` +
       (checks ? `<div class="sl">확인할 것</div>${checks}` : "");
   }
 
@@ -897,42 +1114,104 @@
   function etlTodo() {
     const b = ui.homeBoard; if (!b) return "";
     const since = new Date(Date.now() - 7 * 86400000).toISOString().slice(0, 10);
-    const fresh = b.announcements.filter((a) => a.posted.slice(0, 10) >= since);
-    return (fresh.length ? `<div class="td" data-cands="1"><span class="dd">${fresh.length}건</span><span class="what">eTL 새 공지<small>${esc(fresh.slice(0, 2).map((a) => a.course + " · " + a.title).join(" / "))}</small></span></div>` : "") +
+    const fresh = [...b.announcements, ...(b.posts || [])].filter((a) => a.posted.slice(0, 10) >= since)
+      .sort((x, y) => (x.posted < y.posted ? 1 : -1));
+    return (fresh.length ? `<div class="td" data-cands="1"><span class="dd">${fresh.length}건</span><span class="what">eTL 새 공지·게시판 글<small>${esc(fresh.slice(0, 2).map((a) => a.course + " · " + a.title).join(" / "))}</small></span></div>` : "") +
       (b.files.length ? `<div class="td" data-cands="1"><span class="dd">${b.files.length}개</span><span class="what">eTL 자료 — 과목 폴더에 없는 파일<small>${b.files.some((f) => f.case === "etl" || f.case === "both") ? "eTL에서 바뀐 자료 있음" : b.files.some((f) => f.state === "changed") ? "내가 고친 파일 확인" : "받기·옮기기"}</small></span></div>` : "");
   }
 
   /* schedule notices heard in class (AI reads the whole transcript, user request 2026-10-30): a banner until "확인함" */
   async function loadNotices() {
     if (!api || !api.notices) return;
-    const r = await api.notices();
-    if (!r || !r.ok) return;
-    // decided on the calendar already (confirmed or ignored): nothing left to tell
-    const done = r.unseen.filter((n) => n.status === "confirmed" || n.status === "cancelled").map((n) => n.key);
-    if (done.length) api.notices_seen(done);
-    ui.notices = r.unseen.filter((n) => !done.includes(n.key));
+    const [r, posts, why, news] = await Promise.all([api.notices(), api.etl_board_new ? api.etl_board_new() : null,
+      api.notices_attention ? api.notices_attention().catch(() => null) : null, api.etl_news_new ? api.etl_news_new().catch(() => null) : null]);
+    if (posts && posts.ok) ui.boardNew = posts.items;
+    if (news && news.ok) ui.etlNews = news.items;
+    ui.noticeWhy = why && why.ok && why.show ? why : null;
+    if (r && r.ok) {
+      // decided on the calendar already (confirmed or ignored): nothing left to tell
+      const done = r.unseen.filter((n) => n.status === "confirmed" || n.status === "cancelled").map((n) => n.key);
+      if (done.length) api.notices_seen(done);
+      ui.notices = r.unseen.filter((n) => !done.includes(n.key));
+    }
     renderNotices();
   }
 
+  /* new eTL board posts, with or without files: what was posted, until 확인함 (user 2026-11-20) */
+  function boardNewHtml() {
+    const list = ui.boardNew || [], open = ui.boardOpen || (ui.boardOpen = new Set());
+    if (!list.length) return "";
+    const rows = list.slice(0, 4).map((p) => {
+      const text = (p.text || "").replace(/\s+/g, " ").trim(), long = text.length > 160, full = open.has(p.id);
+      const files = (p.files || []).map((f) => f.name);
+      return `<div class="nb-item" data-key="${esc(p.id)}">
+      <div class="nb-head"><b>${esc(p.course)} · ${esc(p.title)}</b><span class="nb-cert">${esc(mdText(p.posted.slice(0, 10)))} 올림</span></div>
+      <div class="nb-sum">${text ? esc(full || !long ? text : text.slice(0, 160) + "…") : "본문 없음"}</div>
+      <div class="nb-why">${esc(p.board)} · ${esc(p.author)}${files.length ? ` · 첨부: ${esc(files.join(", "))}` : p.attachments ? ` · 첨부 ${p.attachments}개` : " · 첨부 없음"}</div>
+      <div class="nb-acts">${long ? `<button class="mini" data-bn-more="${esc(p.id)}">${full ? "접기" : "내용 전체"}</button>` : ""}<button class="mini" data-bn-seen="${esc(p.id)}">확인함</button></div></div>`;
+    }).join("");
+    return `<div class="nb-top"><b>eTL 게시판 새 글 ${list.length}건</b><small>교수·조교가 올린 글 · 하루 한 번 읽음</small><span class="grow"></span>${list.length > 1 ? `<button class="mini" data-bn-all="1">모두 확인함</button>` : ""}</div>${rows}${list.length > 4 ? `<div class="nb-more">외 ${list.length - 4}건</div>` : ""}`;
+  }
+
+  /* eTL news (D-077): new assignment, changed due date, new course files, and a warning after a submission whose
+     file looks wrong. No AI; told once (also as a Windows notification) and kept here until 확인함. */
+  function etlNewsHtml() {
+    const list = ui.etlNews || [];
+    if (!list.length) return "";
+    const rows = list.slice(0, 4).map((n) => `<div class="nb-item${n.kind === "submit_check" ? " warn-item" : ""}" data-key="${esc(n.key)}">
+      <div class="nb-head"><b>${n.kind === "submit_check" ? ic("alert") + " " : ""}${esc(n.label || "eTL")}</b></div>
+      <div class="nb-sum">${esc(n.line || n.title || "")}</div>
+      <div class="nb-acts"><button class="mini" data-en-seen="${esc(n.key)}">확인함</button></div></div>`).join("");
+    return `<div class="nb-top"><b>eTL 알림 ${list.length}건</b><small>앱이 받아 둔 eTL 과제·자료 목록에서 · 끄는 곳: 설정 › 기본 › 알림</small><span class="grow"></span>${list.length > 1 ? `<button class="mini" data-en-all="1">모두 확인함</button>` : ""}</div>${rows}${list.length > 4 ? `<div class="nb-more">외 ${list.length - 4}건</div>` : ""}`;
+  }
+
+  /* class notices on with ChatGPT (Codex) but kept from going out (D-075): once per state, until 확인함 or 설정 열기 */
+  function noticeWhyHtml() {
+    const w = ui.noticeWhy;
+    if (!w) return "";
+    const what = (w.needs_consent || []).length
+      ? `ChatGPT(Codex)로 보내려면 과목 허용이 필요합니다: ${esc(w.needs_consent.join(", "))} · 허용하기 전에는 이 과목들의 새 전사를 보내지 않습니다.`
+      : `${esc(w.unavailable)} 그동안 공지를 찾지 않습니다(Google로 바꿔 보내지 않습니다).`;
+    return `<div class="nb-item" data-key="why"><div class="nb-head"><b>${ic("alert")} 수업 중 공지 찾기가 멈춰 있습니다</b></div>
+      <div class="nb-sum">${what}</div>
+      <div class="nb-acts"><button class="mini" data-why-open="1">설정 열기</button><button class="mini" data-why-seen="1">확인함</button></div></div>`;
+  }
+  async function noticeWhyDone() {
+    const w = ui.noticeWhy; ui.noticeWhy = null; renderNotices();
+    if (w) { try { await api.notices_attention_seen(w.key); } catch (err) { /* said again on the next read */ } }
+  }
+
   function renderNotices() {
-    const bar = $("noticeBar"), list = ui.notices || [];
-    bar.hidden = !list.length;
-    if (!list.length) { bar.innerHTML = ""; return; }
+    const bar = $("noticeBar"), list = ui.notices || [], board = noticeWhyHtml() + etlNewsHtml() + boardNewHtml();
+    bar.hidden = !list.length && !board;
+    if (!list.length) { bar.innerHTML = board; return; }
     const when = (n) => n.date ? `${dayText(n.date)}${n.date_precision === "approx" ? " 쯤" : ""}` : "날짜 미정";
     const who = { professor: "교수", ta: "조교", student: "학생" };
     const rows = list.slice(0, 4).map((n) => `<div class="nb-item" data-key="${esc(n.key)}">
       <div class="nb-head"><b>${esc(n.course)} · ${esc(when(n))} · ${esc(n.kind_label)}</b><span class="nb-cert c-${esc(n.certainty)}">확신도 ${esc(n.certainty_label)}</span></div>
       <div class="nb-sum">${esc(n.summary)}</div>
-      <div class="nb-quote">“${esc(n.quote)}”<small>${esc(mdText(n.lecture_date))} 수업 ${Math.floor((n.at_ms || 0) / 60000)}분경 · ${esc(n.engines.join("·"))}${who[n.speaker] ? " · " + who[n.speaker] : ""}</small></div>
+      <div class="nb-quote">“${esc(n.quote)}”<small>${n.source === "etl" ? `eTL 공지 '${esc(n.ann_title || "")}' · ${esc(mdText((n.posted || n.lecture_date || "").slice(0, 10)))} 올림 · ChatGPT(Codex)가 읽음`
+        : `${esc(mdText(n.lecture_date))} 수업 ${Math.floor((n.at_ms || 0) / 60000)}분경 · ${esc(n.engines.join("·"))}${who[n.speaker] ? " · " + who[n.speaker] : ""}`}</small></div>
       ${n.date_reasoning ? `<div class="nb-why">날짜 근거: ${esc(n.date_reasoning)}</div>` : ""}
       ${n.stt_note ? `<div class="nb-why">잘못 들렸을 수 있음(추정): ${esc(n.stt_note)}</div>` : ""}
       <div class="nb-acts">${n.event_id && n.date ? `<button class="mini" data-nb-cal="${esc(n.key)}">달력에서 확정·무시</button>` : ""}<button class="mini" data-nb-seen="${esc(n.key)}">확인함</button></div></div>`).join("");
-    bar.innerHTML = `<div class="nb-top"><b>수업 중 공지 ${list.length}건</b><small>AI가 전사본 전체를 읽고 찾은 것 · 확정 전까지는 후보</small><span class="grow"></span>${list.length > 1 ? `<button class="mini" data-nb-all="1">모두 확인함</button>` : ""}</div>${rows}${list.length > 4 ? `<div class="nb-more">외 ${list.length - 4}건</div>` : ""}`;
+    const fromEtl = list.filter((n) => n.source === "etl").length;
+    const head = !fromEtl ? ["수업 중 공지", "AI가 전사본 전체를 읽고 찾은 것"] : fromEtl === list.length ? ["eTL 공지에서 찾은 일정", "AI(ChatGPT)가 eTL 공지 글을 읽고 찾은 것"] : ["수업·eTL 공지", "AI가 전사본과 eTL 공지 글을 읽고 찾은 것"];
+    bar.innerHTML = `<div class="nb-top"><b>${head[0]} ${list.length}건</b><small>${head[1]} · 확정 전까지는 후보</small><span class="grow"></span>${list.length > 1 ? `<button class="mini" data-nb-all="1">모두 확인함</button>` : ""}</div>${rows}${list.length > 4 ? `<div class="nb-more">외 ${list.length - 4}건</div>` : ""}` + board;
   }
 
   function bindNotices() {
     $("noticeBar").addEventListener("click", async (ev) => {
       const t = ev.target.closest("button"); if (!t) return;
+      const posts = ui.boardNew || [];
+      if (t.dataset.whyOpen) { await noticeWhyDone(); openSettings("ai"); return; }
+      if (t.dataset.whySeen) { await noticeWhyDone(); return; }
+      if (t.dataset.bnMore) { const o = ui.boardOpen; o.has(t.dataset.bnMore) ? o.delete(t.dataset.bnMore) : o.add(t.dataset.bnMore); renderNotices(); return; }
+      if (t.dataset.bnAll) { await api.etl_board_seen(posts.map((p) => p.id)); ui.boardNew = []; renderNotices(); return; }
+      const news = ui.etlNews || [];
+      if (t.dataset.enAll) { await api.etl_news_seen(news.map((n) => n.key)); ui.etlNews = []; renderNotices(); return; }
+      if (t.dataset.enSeen) { await api.etl_news_seen([t.dataset.enSeen]); ui.etlNews = news.filter((n) => n.key !== t.dataset.enSeen); renderNotices(); return; }
+      if (t.dataset.bnSeen) { await api.etl_board_seen([t.dataset.bnSeen]); ui.boardNew = posts.filter((p) => p.id !== t.dataset.bnSeen); renderNotices(); return; }
       const list = ui.notices || [];
       if (t.dataset.nbAll) { await api.notices_seen(list.map((n) => n.key)); ui.notices = []; renderNotices(); return; }
       if (t.dataset.nbSeen) { await api.notices_seen([t.dataset.nbSeen]); ui.notices = list.filter((n) => n.key !== t.dataset.nbSeen); renderNotices(); return; }
@@ -957,18 +1236,61 @@
     wave.querySelectorAll("i").forEach((b, i) => { const x = ui.levels[i] ?? 0; setp(b.style, "transform", `scaleY(${+((4 + x * 18) / 22).toFixed(3)})`); });  // 4–22 px of a 22 px bar
   }
 
+  /* how long nothing was recorded, for the summary: floor, at least one second ("1분 5초", "42초") */
+  function lostText(ms) {
+    const sec = Math.max(1, Math.floor((ms || 0) / 1000));
+    return sec < 60 ? `${sec}초` : `${Math.floor(sec / 60)}분${sec % 60 ? ` ${sec % 60}초` : ""}`;
+  }
+  /* the gaps of one finished recording (state.summary or state.pc; backend.py _gap_summary): gaps in the middle,
+     and the open one at the end, where the sound never came back before the recording ended */
+  function gapsText(rec) {
+    const tail = rec.tail_lost_ms !== null && rec.tail_lost_ms !== undefined;
+    const mid = (rec.gaps || 0) - (tail ? 1 : 0), midLost = (rec.lost_ms || 0) - (tail ? rec.tail_lost_ms : 0);
+    let text = mid > 0 ? ` · 중간에 끊김 ${mid}번(${lostText(midLost)} 빠짐)` : "";
+    if (tail) text += rec.cause === "source_lost" ? ` · 장치가 돌아오지 않아 여기까지 저장(마지막 ${lostText(rec.tail_lost_ms)} 빠짐)` : ` · 끝날 때까지 소리가 돌아오지 않음(마지막 ${lostText(rec.tail_lost_ms)} 빠짐)`;
+    else if (rec.cause === "source_lost") text += " · 장치가 돌아오지 않아 여기까지 저장";
+    return text;
+  }
+  /* low disk while recording (state.disk, backend.py _note_disk). `minutes` is how much more can be recorded and still
+     be finished with its MP3, both engines together; 0 = even the part so far no longer fits. Same words as the
+     Windows notification (ui/app.py disk_low_text) */
+  function diskText(minutes) {
+    if (typeof minutes !== "number" || !Number.isFinite(minutes)) return "디스크 공간 부족 — 파일을 지워 주세요";
+    if (minutes <= 0) return "디스크 공간 부족 — 지금까지 녹음한 것도 끝까지 저장할 공간이 모자랍니다. 파일을 지워 주세요";
+    return `디스크 공간 부족 — 끝까지 저장할 수 있는 녹음은 약 ${Math.floor(minutes)}분 남았습니다. 파일을 지워 주세요`;
+  }
+  /* what the clean-up of the WAV files after a recording did that the user should know (backend.py _cleanup_note) */
+  function cleanupText(left) {
+    const out = [];
+    if (left.deleted) out.push(`<span class="warn">휴지통이 없는 드라이브라 WAV 사본 ${Number(left.deleted)}개를 바로 지웠습니다${left.later ? " · 1분 조각 WAV는 전사가 끝나면 마저 지웁니다" : ""}</span>`);
+    if (left.reason !== undefined) out.push(`<span class="warn">WAV 정리를 다 하지 못했습니다${left.reason ? ": " + esc(left.reason) : ""}</span>`);
+    else if (left.error !== undefined) out.push(`<span class="warn" title="${esc(left.error)}">WAV 정리 중 오류가 나 WAV 파일이 남았습니다</span>`);
+    return out.join("");
+  }
+  const sourceName = (mode) => mode === "loopback" ? "PC 소리" : "마이크";
+  const noSound = (mode) => mode === "loopback" ? "PC 소리가" : "마이크 소리가";
+
   function healthHtml(st) {
     const s = st.status || {}, sum = st.summary;
     if (st.phase === "starting") return `<span><i class="dot wait"></i>녹음 엔진 시작 중…</span>`;
     if (st.phase === "recording") {
-      if (s.paused) return `<span class="warn"><i class="dot wait"></i>일시정지 중 — 지금 소리는 저장하지 않습니다 · <span class="link" data-act="resume">다시 녹음</span></span><span class="num faint">${esc(shortDevice(s.device))}</span>`;
+      // the second engine while it records: the PC-sound partner, or the other source started on its own
+      const two = st.pc && st.pc.state === "recording" ? st.pc.status || {} : null, twoName = sourceName(st.pc && st.pc.mode || "loopback");
+      // said in front of whatever the sound line says, never instead of it: low disk (backend.py _note_disk, both
+      // engines together) and a stall of the second engine
+      const disk = st.disk && st.disk.low ? `<span class="err"><i class="dot rec"></i>${esc(diskText(st.disk.minutes))}</span>` : "";
+      const stall2 = two && two.stalled ? `<span class="err"><i class="dot rec"></i>${noSound(st.pc.mode || "loopback")} 들어오지 않습니다 — 장치를 다시 여는 중</span>` : "";
+      const pre = stall2 + disk;
+      // the device stopped giving sound: the engine opens it again every few seconds (recorder/service.py Recovery)
+      if (s.stalled) return `<span class="err"><i class="dot rec"></i>${two ? noSound(s.mode) : "소리가"} 들어오지 않습니다 — 장치를 다시 여는 중 (이어폰·마이크 연결을 확인하세요)</span>${pre}<span class="num faint">${esc(shortDevice(s.device))}</span>`;
+      if (s.paused) return `${pre}<span class="warn"><i class="dot wait"></i>일시정지 중 — 지금 소리는 저장하지 않습니다 · <span class="link" data-act="resume">다시 녹음</span></span><span class="num faint">${esc(shortDevice(s.device))}</span>`;
       // PC sound is recorded only while something plays: no samples arrive in silence, so the timer stands still too
-      if (s.mode === "loopback" && (s.rms === null || s.rms === undefined)) return `<span class="warn"><i class="dot wait"></i>PC에서 소리가 나지 않는 중 — PC 소리는 날 때만 저장되고, 녹음 시간도 그때만 갑니다</span><span class="num faint">${esc(shortDevice(s.device))}</span>`;
-      if (s.quiet) return `<span class="warn"><i class="dot warn"></i>소리 매우 작음 (30초 이상)</span><span class="num faint">${db(s.rms)} · ${esc(shortDevice(s.device))}</span>`;
-      if (s.dropped_samples || s.capture_status_count) return `<span class="warn"><i class="dot warn"></i>캡처 누락 ${s.dropped_samples || 0} · 경고 ${s.capture_status_count || 0}</span><span class="num faint">${db(s.rms)}</span>`;
-      const pc = st.pc && st.pc.status ? ` · PC 소리 ${db(st.pc.status.rms)}` : st.pc && st.pc.state === "error" ? " · PC 소리 녹음 안 됨" : "";
+      if (s.mode === "loopback" && (s.rms === null || s.rms === undefined)) return `${pre}<span class="warn"><i class="dot wait"></i>PC에서 소리가 나지 않는 중 — PC 소리는 날 때만 저장되고, 녹음 시간도 그때만 갑니다</span><span class="num faint">${esc(shortDevice(s.device))}</span>`;
+      if (s.quiet) return `${pre}<span class="warn"><i class="dot warn"></i>소리 매우 작음 (30초 이상)</span><span class="num faint">${db(s.rms)} · ${esc(shortDevice(s.device))}</span>`;
+      if (s.dropped_samples || s.capture_status_count) return `${pre}<span class="warn"><i class="dot warn"></i>캡처 누락 ${s.dropped_samples || 0} · 경고 ${s.capture_status_count || 0}</span><span class="num faint">${db(s.rms)}</span>`;
+      const pc = st.pc && st.pc.status ? ` · ${twoName} ${db(st.pc.status.rms)}` : st.pc && st.pc.state === "error" ? ` · ${twoName} 녹음 안 됨` : "";
       const lv = st.live && st.live.state === "running" ? " · 녹음 중 전사" : "";
-      return `<span><i class="dot ok"></i>소리 정상</span><span class="num faint">${db(s.rms)} · ${esc(shortDevice(s.device))}${pc}${lv}</span>`;
+      return `${pre}<span><i class="dot ok"></i>소리 정상</span><span class="num faint">${db(s.rms)} · ${esc(shortDevice(s.device))}${pc}${lv}</span>`;
     }
     if (st.phase === "stopping") return `<span><i class="dot wait"></i>녹음 끝내는 중…</span>`;
     if (st.phase === "finalizing") return `<span><i class="dot wait"></i>저장 중(병합)… ${fmt(sum && sum.total_ms)}</span>`;
@@ -977,9 +1299,22 @@
       return `<span><i class="dot ${sum.recycle_error ? "warn" : "wait"}"></i>${t}</span>`;
     }
     if (st.phase === "done" && sum) {
-      const warn = sum.partial || sum.finalize_error;
+      // the second engine's file: its own gaps and ending are said here too (backend.py _on_pc_event keeps them)
+      const two = st.pc, twoName = sourceName(two && two.mode || "loopback");
+      const twoLost = two ? gapsText(two) : "", twoGaps = twoLost ? `: ${twoLost.replace(/^ · /, "").split(" · ").join(", ")}` : "";
+      const twoText = !two ? "" : two.state === "error" ? ` · ${twoName} 저장 실패` : two.state === "done" ? ` · ${twoName} 따로 저장${twoGaps}` : ["starting", "recording"].includes(two.state) ? ` · ${twoName} 따로 녹음 중` : ` · ${twoName} 저장 중…${twoGaps}`;
+      // a recording that lost sound is never shown as a clean one: the engine marks it partial, and the cause and
+      // the gaps are looked at here as well
+      const warn = sum.partial || sum.finalize_error || sum.cause === "source_lost" || sum.gaps || !!twoGaps;
       let html = sum.auto_stop ? `<span class="warn"><i class="dot warn"></i>${esc(sum.auto_stop.reason)} · 소리 없는 뒷부분은 회차 화면의 [자르기]로 뺄 수 있습니다</span>` : "";
-      html += `<span class="${warn ? "warn" : ""}"><i class="dot ${warn ? "warn" : "ok"}"></i>저장됨 · <span class="num">${fmt(sum.total_ms)}</span> · 누락 ${sum.dropped_samples || 0}${sum.paused_ms ? " · 일시정지 " + fmt(sum.paused_ms) + " 제외" : ""}${sum.bookmarks ? " · ★ " + sum.bookmarks : ""}${st.pc ? (st.pc.state === "error" ? " · PC 소리 저장 실패" : st.pc.state === "done" ? " · PC 소리 따로 저장" : " · PC 소리 저장 중…") : ""}</span>`;
+      html += `<span class="${warn ? "warn" : ""}"><i class="dot ${warn ? "warn" : "ok"}"></i>저장됨 · <span class="num">${fmt(sum.total_ms)}</span> · 누락 ${sum.dropped_samples || 0}${sum.paused_ms ? " · 일시정지 " + fmt(sum.paused_ms) + " 제외" : ""}${gapsText(sum)}${sum.bookmarks ? ` · ${ic("star")} ` + sum.bookmarks : ""}${twoText}</span>`;
+      // the clean-up of the WAV files after the recording (either file): deleted for good on a drive without a Recycle
+      // Bin, or not done and why. Said once: the counts of both files are added, the first reason is shown
+      const notes = [sum.cleanup, two && two.cleanup].filter(Boolean);
+      if (notes.length) {
+        const deleted = notes.reduce((a, n) => a + (Number(n.deleted) || 0), 0), why = notes.find((n) => n.reason !== undefined || n.error !== undefined) || {};
+        html += cleanupText({ deleted, later: notes.some((n) => n.later), reason: why.reason, error: why.reason === undefined ? why.error : undefined });
+      }
       html += `<span class="link" data-act="folder" title="${esc(sum.session_dir)}">저장 위치</span>`;
       const link = st.link || {};
       if (link.state === "short") html += `<span class="warn">1분 미만 녹음 — 실수로 누른 거면 버리세요</span><span class="link danger-t" data-act="short-discard">버리기</span><span class="link" data-act="short-keep">회차에 남기기</span>`;
@@ -1001,6 +1336,7 @@
     if (p.running) return `<span><i class="dot wait"></i>소리 점검 중… ${Math.ceil((p.remaining_ms || 0) / 1000)}초</span><span class="num faint">${p.peak === undefined || p.peak === null ? "" : db(p.peak)}</span>`;
     const where = ui.pc && !ui.mic ? "PC 소리" : "마이크";  // the probe checks the chosen source
     const text = { ok: `${where} 점검 정상`, quiet: "소리가 작아요 — 말해서 확인해 보세요", silent: "입력이 거의 없음 — 조용한 곳이면 정상", no_data: "소리가 들어오지 않음 — 장치 확인", error: `${where}를 열 수 없음` }[p.verdict] || "점검 완료";
+    if (p.mic_blocked) return `<span class="err"><i class="dot rec"></i>${esc(p.mic_blocked)}</span><span class="link" data-act="mic-settings">Windows 설정 열기</span><span class="link" data-act="probe">다시 점검</span>`;
     const tone = p.verdict === "ok" ? "ok" : p.verdict === "error" || p.verdict === "no_data" ? "rec" : "wait";
     return `<span class="${tone === "rec" ? "err" : ""}"><i class="dot ${tone}"></i>${text}</span><span class="num faint">${p.verdict === "error" ? esc(p.message || "") : db(p.peak)}</span><span class="link" data-act="probe">다시 점검</span>`;
   }
@@ -1080,7 +1416,7 @@
       : tr ? `Google 전사: ${tr.label || "진행 중"}`
       : "녹음을 저장했습니다. 'Google 전사 시작'을 누르면 전사가 시작됩니다.";
     rows.push(`<div class="seg-row"><div class="t num">00:00</div><div><div class="x" style="color:var(--sub)">${first}</div></div></div>`);
-    (st.bookmarks || []).forEach((b) => rows.push(`<div class="seg-row"><div class="t num">${fmt(b.at_ms).replace(/^00:/, "")}</div><div><div class="x">★ 중요 표시</div><div class="badges"><span class="b cue">내가 표시</span></div></div></div>`));
+    (st.bookmarks || []).forEach((b) => rows.push(`<div class="seg-row"><div class="t num">${fmt(b.at_ms).replace(/^00:/, "")}</div><div><div class="x">${ic("star")} 중요 표시</div><div class="badges"><span class="b cue">내가 표시</span></div></div></div>`));
     const html = rows.join("");
     if ($("trList").dataset.h !== html) { $("trList").innerHTML = html; $("trList").dataset.h = html; }
   }
@@ -1110,7 +1446,7 @@
     const list = ui.lecture.transcripts.filter((t) => t.segments);
     const save = async (id) => {
       const r = await api.transcript_save(id);
-      toast(r.ok ? `다운로드 폴더에 저장했습니다 · ${r.name}` : r.error || "저장하지 못했습니다");
+      toast(r.message || (r.ok ? `다운로드 폴더에 저장했습니다 · ${r.name}` : r.error || "저장하지 못했습니다"));
     };
     if (list.length === 1) return save(list[0].id);
     menu(anchor, [{ label: "어느 전사본을 내려받을까요?", items: list.map((t) => ({ value: t.id, text: t.label, note: `~${Math.floor((t.last_ms || 0) / 60000)}분${t.in_use ? " · 사용본" : ""}` })) }], save);
@@ -1121,13 +1457,12 @@
     const inUse = L.in_use && L.transcripts.find((t) => t.id === L.in_use.transcript_id);
     $("lvHead").innerHTML = L.transcripts.length
       ? L.transcripts.map((t) => `<span class="b${t.in_use ? " use" : ""}" title="${esc(t.source_file || "")}">${esc(t.label)}${t.in_use ? " · 사용본" : ""}</span>`).join("") +
-        (L.transcripts.length > 1 ? `<span class="switch" id="switchUse">사용본 바꾸기 ▾</span>` : "") +
-        (L.transcripts.filter((t) => t.segments).length > 1 ? `<span class="switch" id="cmpTr" title="두 엔진의 전사를 시각에 맞춰 나란히 놓고 다른 낱말을 표시합니다">나란히 비교</span>` : "") +
-        (L.transcripts.some((t) => t.segments) ? `<span class="switch" id="saveTr" title="전사본을 .txt로 다운로드 폴더에 저장합니다(내가 고친 곳 반영)">내려받기${L.transcripts.filter((t) => t.segments).length > 1 ? " ▾" : ""}</span>` : "")
+        (L.transcripts.length > 1 ? `<span class="switch" id="switchUse">사용본 바꾸기 ${ic("down")}</span>` : "") +
+        (L.transcripts.some((t) => t.segments) ? `<span class="switch" id="saveTr" title="전사본을 .txt로 다운로드 폴더에 저장합니다(내가 고친 곳 반영)">내려받기${L.transcripts.filter((t) => t.segments).length > 1 ? " " + ic("down") : ""}</span>` : "")
       : `<span>전사본 없음</span>`;
     const R = L.range, D = R && R.decided;
-    if (D && D.cut) $("lvHead").innerHTML += `<span class="b" title="원본 전체는 _lecturehub에 그대로 있습니다">녹음 범위 ${wall(R.suggest.recorded_start, D.start_ms)}–${wall(R.suggest.recorded_start, D.end_ms)} · 원본 보관${L.hidden_segments ? ` · 수업 뒤 ${L.hidden_segments}구간 숨김` : ""}</span><span class="switch" data-range="revert">되돌리기</span>`;
-    if ((L.bookmarks || []).length) $("lvHead").innerHTML += `<span class="bm-list" title="녹음 중 누른 ★ 중요 표시 — 누르면 그 시각부터 재생">★ ${L.bookmarks.map((b) => `<span class="bm" data-seek="${b.at_ms}">${clock(b.at_ms)}</span>`).join("")}</span>`;
+    if (D && D.cut) $("lvHead").innerHTML += `<span class="b" title="원본 전체는 _lecturehub에 그대로 있습니다">녹음 범위 ${wall(R.suggest.recorded_start, wallOffset(R.suggest.pauses, D.start_ms))}–${wall(R.suggest.recorded_start, wallOffset(R.suggest.pauses, D.end_ms))} · 원본 보관${L.hidden_segments ? ` · 수업 뒤 ${L.hidden_segments}구간 숨김` : ""}</span><span class="switch" data-range="revert">되돌리기</span>`;
+    if ((L.bookmarks || []).length) $("lvHead").innerHTML += `<span class="bm-list" title="녹음 중 누른 중요 표시 — 누르면 그 시각부터 재생">${ic("star")} ${L.bookmarks.map((b) => `<span class="bm" data-seek="${b.at_ms}">${clock(b.at_ms)}</span>`).join("")}</span>`;
     if ((L.orphaned_corrections || []).length) $("lvHead").innerHTML += `<span class="b cue" title="사용본이 바뀌어 자리를 못 찾은 교정입니다. 전사를 보고 다시 고쳐 주세요">교정 ${L.orphaned_corrections.length}건 다시 확인 필요</span>`;
     const media = L.media;
     if (media && media.url) {
@@ -1163,10 +1498,11 @@
     }
     const S = L.range && L.range.suggest;
     if (S && S.ask) {
-      const t0 = S.recorded_start, spoke = S.speech_end_ms ?? S.class_end_ms;
-      rows.unshift(`<div class="range-card"><div><b>수업이 ${wall(t0, spoke)}쯤 끝난 것 같아요</b> · 녹음은 ${wall(t0, S.duration_ms)}까지(${Math.floor(S.duration_ms / 60000)}분)</div>` +
+      // speech_end_ms, end_ms and duration_ms are audio positions; class_end_ms is already a wall-clock offset
+      const t0 = S.recorded_start, spoke = S.speech_end_ms !== null && S.speech_end_ms !== undefined ? wallOffset(S.pauses, S.speech_end_ms) : S.class_end_ms;
+      rows.unshift(`<div class="range-card"><div><b>수업이 ${wall(t0, spoke)}쯤 끝난 것 같아요</b> · 녹음은 ${wall(t0, wallOffset(S.pauses, S.duration_ms))}까지(${Math.floor(S.duration_ms / 60000)}분)</div>` +
         `<div class="nsub">근거: ${esc(S.reason)}. 자르면 원본은 그대로 두고 수업 부분만 따로 저장해 재생·전사·노트·녹음본 폴더에 씁니다.</div>` +
-        `<div class="acts"><button class="ghost primary" data-range="cut" data-end="${S.end_ms}">${wall(t0, S.end_ms)}까지로 자르기</button>` +
+        `<div class="acts"><button class="ghost primary" data-range="cut" data-end="${S.end_ms}">${wall(t0, wallOffset(S.pauses, S.end_ms))}까지로 자르기</button>` +
         `<button class="ghost" data-range="adjust">끝 지점 조정</button><span class="link" data-range="listen" data-end="${S.end_ms}">끝 지점 들어 보기</span>` +
         ` · <span class="link" data-range="keep">끝까지 수업 맞음</span></div></div>`);
     }
@@ -1178,6 +1514,7 @@
 
   /* the middle pane: 실시간 전사 on the recording screen; 정리본 and 자료·녹음 on a lecture (2026-11-13) */
   function renderCenter() {
+    placeLivePanel();
     const lecture = ui.view === "lecture" && !!ui.lecture;
     $("liveTab").hidden = lecture; $("htmlTab").hidden = !lecture; $("filesTab").hidden = !lecture;
     const on = document.querySelector('.seg[data-group="c"] button.on'), t = on && on.dataset.t;
@@ -1198,11 +1535,12 @@
     document.querySelector(".center").classList.toggle("has-html", pages.length > 0);
     $("htmlFrame").hidden = !pages.length; $("noteEmpty").hidden = !!pages.length;
     if (pages.length) {
-      $("htmlSel").innerHTML = pages.map((n, i) => `<option value="${i}">${esc(n.path.split("\\").pop())}</option>`).join("");
+      $("htmlSel").innerHTML = pages.map((n, i) => `<option value="${i}">${esc(n.path.split("\\").pop())}${n.by_ai_app ? " · " + esc(n.written_by || "AI 앱이 씀") : ""}</option>`).join("");
       $("htmlSel").hidden = pages.length < 2;
       ui.htmlPages = pages;
       const job = ui.noteJob || {}, running = job.state === "running" && job.lecture_id === L.id;
       setp($("noteRemake"), "disabled", running || !L.transcripts.some((t) => t.segments));
+      $("noteCodex").hidden = !(ui.aiLink && ui.aiLink.enabled);
       sett($("noteRemake"), running ? "만드는 중…" : "다시 만들기");
       if (document.querySelector('.seg[data-group="c"] button.on')?.dataset.t !== "c-files") selectTab("c", "c-html");
       if ($("htmlFrame").dataset.path !== pages[0].path) { showHtml(pages[0]); setHtmlSize(ui.noFullHtml ? "pane" : "full"); }  // default: full window
@@ -1229,6 +1567,7 @@
     return `${icon}<div class="big">이 회차는 아직 정리본이 없습니다</div>` +
       `<div>전사를 ${engine}로 읽어 읽기 쉬운 글로 정리하고, 근거가 된 전사 시각과 원문은 각주로 남깁니다.<br>각주가 실제 전사와 맞을 때만 저장합니다.</div>` +
       `<button class="ghost primary" data-note="make">정리본 만들기</button>` +
+      (ui.aiLink && ui.aiLink.enabled ? `<button class="ghost" data-note="codex" title="이 PC의 Codex를 열어 이 회차를 Lecture Hub 도구로 읽게 합니다">ChatGPT(Codex)로 열기</button>` : "") +
       (job.state && job.lecture_id === L.id && job.state !== "running" && job.error ? `<div class="err">지난번에 만들지 못했습니다: ${esc(job.error)}</div>` : "");
   }
 
@@ -1256,6 +1595,11 @@
   }
   async function noteAction(el) {
     if (el.dataset.note === "make" && ui.lecture) { el.disabled = true; if (!(await makeNote(ui.lecture.id))) el.disabled = false; }
+    if (el.dataset.note === "codex" && ui.lecture) await openCodex(ui.lecture.id);
+  }
+  async function openCodex(lectureId) {  // D-076: the user's own Codex, with Lecture Hub connected for that run
+    const r = await api.ai_link_open_codex(lectureId);
+    toast(r.message || (r.ok ? "Codex를 열었습니다 · 이 회차를 Lecture Hub 도구로 읽게 했습니다" : r.error));
   }
   async function pollNote() {
     const s = await api.note_status();
@@ -1302,6 +1646,15 @@
   }
 
   /* ---------- '수업 외' / move a recording to another lecture ---------- */
+  /* the toast after a recording was moved (index/relink.py move): about the old 녹음본 copy, one of recycled_copy,
+     copy_left (+ copy_note: why it stayed), or copy_note alone (recycling failed and the file is no longer there) */
+  function relinkText(r) {
+    let text = r.transcripts ? `옮겼습니다 · 전사 ${r.transcripts}개 포함` : "옮겼습니다";
+    if (r.recycled_copy) text += " · 잘못된 녹음본 복사본은 휴지통으로";
+    else if (r.copy_left) text += " · 옛 녹음본 복사본은 그대로 두었습니다" + (r.copy_note ? `(${r.copy_note})` : "");
+    else if (r.copy_note) text += " · " + r.copy_note;
+    return text;
+  }
   function moveRecording(anchor) {
     const L = ui.lecture, id = anchor.dataset.move;
     const courses = ui.info.courses.map((c) => ({ value: "c:" + c.folder, text: c.folder, note: `${mdText(L.date)} 회차` }));
@@ -1320,7 +1673,7 @@
         r = await api.relink(id, course, L.date, true);
       }
       if (!r.ok) { toast(r.error); return; }
-      toast((r.transcripts ? `옮겼습니다 · 전사 ${r.transcripts}개 포함` : "옮겼습니다") + (r.recycled_copy ? " · 잘못된 녹음본 복사본은 휴지통으로" : ""));
+      toast(relinkText(r));
       loadSidebar(); openLecture(r.lecture_id);
     });
   }
@@ -1332,11 +1685,11 @@
     if (!p.ok) { toast(p.error); return false; }
     const files = p.trash.map((x) => "· " + x.split("\\").slice(-2).join("\\")).join("\n");
     const body = `${p.lecture ? p.lecture + " · " : ""}휴지통으로 보냅니다(${mb(p.bytes)}). [녹음 정리]에서 되살릴 수 있습니다.\n${files}` +
-      (p.transcripts ? `\n⚠ 이 녹음의 전사 ${p.transcripts}개가 앱에서 사라집니다.` : "\n이 녹음에는 전사가 없습니다.") + (p.archive_note ? `\n${p.archive_note}` : "");
+      (p.transcripts ? `\n이 녹음의 전사 ${p.transcripts}개도 앱에서 사라집니다.` : "\n이 녹음에는 전사가 없습니다.") + (p.archive_note ? `\n${p.archive_note}` : "");
     if (!(await dialog({ title: p.transcripts ? "전사가 있는 녹음입니다 — 버릴까요?" : "이 녹음을 버릴까요?", body, ok: "휴지통으로", tone: "danger" }))) return false;
     let withPair = false;
     if (p.pair) withPair = await dialog({ title: `같이 녹음한 ${p.pair.kind} 녹음도 버릴까요?`,
-      body: p.pair.transcripts ? `⚠ ${p.pair.kind} 녹음에 전사 ${p.pair.transcripts}개가 있습니다. 같이 버리면 그 전사도 사라집니다.\n보통은 [이것만]을 고르세요.` : `${p.pair.session} (전사 없음)`,
+      body: p.pair.transcripts ? `${p.pair.kind} 녹음에 전사 ${p.pair.transcripts}개가 있습니다. 같이 버리면 그 전사도 사라집니다.\n보통은 [이것만]을 고르세요.` : `${p.pair.session} (전사 없음)`,
       ok: "같이 버리기", cancel: "이것만", tone: "danger" });
     const r = await api.discard(mediaId, withPair);
     if (!r.ok) { toast(r.error); return false; }
@@ -1349,14 +1702,14 @@
     const files = p.trash.map((x) => "· " + x.split("\\").slice(-2).join("\\")).join("\n");
     const stays = [p.stays.transcripts ? `가져온 전사 ${p.stays.transcripts}개` : "", p.stays.slides ? "슬라이드 연결" : ""].filter(Boolean);
     const body = `녹음 ${p.recordings.length}개를 휴지통으로 보냅니다(${mb(p.bytes)}). [녹음 정리]에서 되살릴 수 있습니다.\n${files}` +
-      (p.transcripts ? `\n⚠ 이 녹음들의 전사 ${p.transcripts}개가 앱에서 사라집니다.` : "") +
+      (p.transcripts ? `\n이 녹음들의 전사 ${p.transcripts}개가 앱에서 사라집니다.` : "") +
       (stays.length ? `\n${stays.join("·")}은(는) 남으므로 회차는 목록에 남습니다.` : "\n회차가 목록에서 사라지고, 다시 녹음하면 이 번호로 새로 잡힙니다.");
     if (!(await dialog({ title: `${p.lecture || "이 회차"}를 버릴까요?`, body, ok: "휴지통으로", tone: "danger" }))) return false;
     let withPair = false;
     if (p.pairs.length) {
       const t = p.pairs.reduce((n, x) => n + (x.transcripts || 0), 0);
       withPair = await dialog({ title: `같이 녹음한 ${p.pairs.map((x) => x.kind).join("·")} 녹음도 버릴까요?`,
-        body: t ? `⚠ 그 녹음에 전사 ${t}개가 있습니다. 같이 버리면 그 전사도 사라집니다.` : `${p.pairs.map((x) => x.session).join(", ")} (전사 없음)`,
+        body: t ? `그 녹음에 전사 ${t}개가 있습니다. 같이 버리면 그 전사도 사라집니다.` : `${p.pairs.map((x) => x.session).join(", ")} (전사 없음)`,
         ok: "같이 버리기", cancel: "이것만", tone: "danger" });
     }
     const r = await api.lecture_discard(lectureId, withPair);
@@ -1373,7 +1726,7 @@
     if (document.querySelector(".hold-panel")) return;
     const scrim = document.createElement("div");
     scrim.className = "scrim top";
-    scrim.innerHTML = `<div class="hold-panel"><div class="hhead"><b>녹음 정리</b><span class="nsub">실수 녹음·시험 녹음을 휴지통으로 보냅니다. 완전히 지우지 않습니다.</span><button class="ibtn" data-close="1" title="닫기">✕</button></div><div class="hlist" id="slist"><div class="hint">불러오는 중…</div></div></div>`;
+    scrim.innerHTML = `<div class="hold-panel"><div class="hhead"><b>녹음 정리</b><span class="nsub">실수 녹음·시험 녹음을 휴지통으로 보냅니다. 완전히 지우지 않습니다.</span><button class="ibtn" data-close="1" title="닫기">${ic("x")}</button></div><div class="hlist" id="slist"><div class="hint">불러오는 중…</div></div></div>`;
     document.body.appendChild(scrim); keepFocus(scrim);
     const close = () => { scrim.remove(); document.removeEventListener("keydown", key); loadSidebar(); };
     const key = (e) => { if (e.key === "Escape" && isTop(scrim)) close(); };
@@ -1415,14 +1768,14 @@
     if (document.querySelector(".hold-panel")) return;
     const scrim = document.createElement("div");
     scrim.className = "scrim top";
-    scrim.innerHTML = `<div class="hold-panel"><div class="hhead"><b>${esc(course)} 자료</b><span class="nsub">누르면 열립니다. 폴더가 곧 분류입니다.</span><button class="ibtn" data-close="1" title="닫기">✕</button></div><div class="hlist" id="flist"><div class="hint">불러오는 중…</div></div></div>`;
+    scrim.innerHTML = `<div class="hold-panel"><div class="hhead"><b>${esc(course)} 자료</b><span class="nsub">누르면 열립니다. 폴더가 곧 분류입니다.</span><button class="ibtn" data-close="1" title="닫기">${ic("x")}</button></div><div class="hlist" id="flist"><div class="hint">불러오는 중…</div></div></div>`;
     document.body.appendChild(scrim); keepFocus(scrim);
     const close = () => { scrim.remove(); document.removeEventListener("keydown", key); closeMenu(); };
     const key = (e) => { if (e.key === "Escape" && isTop(scrim)) close(); };
     document.addEventListener("keydown", key);
     const size = (b) => b >= 1048576 ? `${(b / 1048576).toFixed(1)} MB` : `${Math.max(1, Math.round(b / 1024))} KB`;
     const row = (it, loose) => `<div class="frow" data-path="${esc(it.path)}"><svg><use href="#${it.folder ? "i-folder" : "i-file"}"/></svg><span class="fname">${esc(it.name)}</span><span class="nsub num">${it.folder ? `${it.count}개` : size(it.bytes)}</span>` +
-      (loose ? `<span class="link" data-sort="${esc(it.path)}" data-suggest="${esc(it.suggest || "")}">${it.suggest ? `${esc(it.suggest)}?` : "분류"} ▾</span>` : "") + `</div>`;
+      (loose ? `<span class="link" data-sort="${esc(it.path)}" data-suggest="${esc(it.suggest || "")}">${it.suggest ? `${esc(it.suggest)}?` : "분류"} ${ic("down")}</span>` : "") + `</div>`;
     let data = null;
     const load = async () => {
       const r = await api.course_files(course), box = scrim.querySelector("#flist");
@@ -1475,7 +1828,7 @@
       const head = `<div class="ihead"><b title="${esc(x.path)}">${esc(x.name)}</b><span class="nsub num">${x.duration_ms ? clock(x.duration_ms) + " · " : ""}${x.bytes ? mb(x.bytes) : ""}${x.convert ? " · MP3로 바꿔서 보관" : ""}</span>` +
         (x.done || x.working ? "" : `<span class="link" data-idrop="${i}">빼기</span>`) + `</div>`;
       if (!x.ok) return `<div class="irow bad">${head}<div class="nsub warn">${esc(x.error || "가져올 수 없는 파일입니다")}</div></div>`;
-      if (x.done) return `<div class="irow done">${head}<div class="nsub">✓ ${esc(x.done)} <span class="link" data-iopen="${esc(x.lecture_id)}">회차 열기</span></div></div>`;
+      if (x.done) return `<div class="irow done">${head}<div class="nsub">${ic("tick")} ${esc(x.done)} <span class="link" data-iopen="${esc(x.lecture_id)}">회차 열기</span></div></div>`;
       const g = x.guess || {};
       return `<div class="irow">${head}<div class="hform">` +
         `<select data-i="${i}" data-f="course">${importCourseOptions(x.course)}</select>` +
@@ -1544,7 +1897,7 @@
     if (!imp.open) {
       const scrim = document.createElement("div");
       scrim.className = "scrim top import-scrim";
-      scrim.innerHTML = `<div class="hold-panel"><div class="hhead"><b>녹음 가져오기</b><span class="nsub">휴대폰 등 앱 밖에서 녹음한 파일 · 원본은 그대로 두고 앱 안에 복사합니다</span><button class="ibtn" data-close="1" title="닫기">✕</button></div>` +
+      scrim.innerHTML = `<div class="hold-panel"><div class="hhead"><b>녹음 가져오기</b><span class="nsub">휴대폰 등 앱 밖에서 녹음한 파일 · 원본은 그대로 두고 앱 안에 복사합니다</span><button class="ibtn" data-close="1" title="닫기">${ic("x")}</button></div>` +
         `<div class="hlist"><div class="idrop"><svg><use href="#i-import"/></svg><div><b>녹음 파일을 이 창에 끌어다 놓으세요</b><div class="nsub">탐색기나 카카오톡 대화창에서 바로 끌어올 수 있습니다 (m4a · mp3 · wav 등)</div></div><button class="ghost" id="impPick">파일 고르기…</button></div>` +
         `<div id="impList"></div><div class="iacts"><button class="ghost primary" id="impGo" hidden>가져오기</button></div><div id="impRecent"></div></div></div>`;
       document.body.appendChild(scrim); keepFocus(scrim);
@@ -1593,6 +1946,11 @@
     window.addEventListener("drop", (e) => { if (!files(e)) return; e.preventDefault(); depth = 0; veil.hidden = true; }, true);
     // the full paths arrive from the app side (ui/app.py _on_drop); a web page alone only sees file names
     window.__lecturehubDropped = (paths, names) => {
+      // the drop handler can be bound twice (pywebview says "loaded" again after a refused navigation): the same
+      // drop reported twice within a second opens one dialog
+      const key = JSON.stringify([paths || [], names || []]), now = Date.now();
+      if (key === ui.lastDrop && now - (ui.lastDropAt || 0) < 1000) return;
+      ui.lastDrop = key; ui.lastDropAt = now;
       if (paths && paths.length) openImport(paths);
       else toast(names && names.length ? "파일 위치를 읽지 못했습니다 — [파일 고르기]를 써 주세요" : "파일이 아닙니다");
     };
@@ -1600,23 +1958,37 @@
 
   /* ---------- D-057: recording range fix (the original is kept; a derived clip is used) ---------- */
   const wall = (t0, ms) => { const d = new Date((t0 || 0) + (ms || 0)); return `${d.getHours()}:${String(d.getMinutes()).padStart(2, "0")}`; };
+  /* Audio position <-> wall-clock offset from the recording start. `holes` is media_range.pauses() (plan/suggest
+     "pauses"): the stretches of wall-clock time that are not in the audio, i.e. pauses and the gaps of a device
+     that stopped delivering, [{at_ms: audio position, paused_ms}] in audio order. */
+  const wallOffset = (holes, ms) => ms + (holes || []).reduce((a, x) => a + (x.at_ms <= ms ? x.paused_ms : 0), 0);
+  function audioPosition(wallMs, holes) {  // media_range.audio_position: a moment inside a hole maps to where it began
+    let shift = 0;
+    for (const h of holes || []) {
+      const begins = h.at_ms + shift;
+      if (wallMs <= begins) break;
+      if (wallMs < begins + h.paused_ms) return h.at_ms;
+      shift += h.paused_ms;
+    }
+    return wallMs - shift;
+  }
   async function rangeAction(el) {
     const L = ui.lecture, R = L.range, S = R.suggest, act = el.dataset.range;
     if (act === "listen") { jumpTo(Math.max(0, +el.dataset.end - 10000), true); return; }
     let end = +el.dataset.end;
     if (act === "adjust") {
-      const v = await askText({ title: "수업 끝 시각", body: "이 시각까지 남기고 뒤는 잘라 냅니다(원본은 그대로 보관). 예: 11:12", value: wall(S.recorded_start, S.end_ms) });
+      const v = await askText({ title: "수업 끝 시각", body: "이 시각까지 남기고 뒤는 잘라 냅니다(원본은 그대로 보관). 예: 11:12", value: wall(S.recorded_start, wallOffset(S.pauses, S.end_ms)) });
       if (v === null) return;
       const m = v.trim().match(/^(\d{1,2}):(\d{2})$/);
       if (!m) { toast("11:12처럼 적어 주세요"); return; }
       const d = new Date(S.recorded_start); d.setHours(+m[1], +m[2], 0, 0);
-      end = d.getTime() - S.recorded_start;
+      end = audioPosition(d.getTime() - S.recorded_start, S.pauses);  // a clock time: the pauses and gaps before it are not in the audio
       if (!(end > 60000 && end <= S.duration_ms)) { toast("녹음 시간 안의 시각을 적어 주세요"); return; }
     }
     if (act === "cut" || act === "adjust") {
       const r = await api.range_cut(R.media_id, 0, end);
       if (!r.ok) { toast(r.error); return; }
-      toast(`${wall(S.recorded_start, end)}까지로 잘랐습니다 · 원본은 그대로 보관`);
+      toast(`${wall(S.recorded_start, wallOffset(S.pauses, end))}까지로 잘랐습니다 · 원본은 그대로 보관`);
     } else if (act === "keep") {
       const r = await api.range_keep(R.media_id); if (!r.ok) { toast(r.error); return; }
       toast("끝까지 수업으로 두었습니다");
@@ -1639,8 +2011,8 @@
     if (!rec) return;
     const plan = await api.range_plan(mediaId);
     if (!plan.ok) { toast(plan.error); return; }
-    // audio time → wall clock: add the pauses before that point (the audio has no pauses in it)
-    const shift = (ms) => (plan.pauses || []).reduce((a, x) => a + (x.at_ms <= ms ? x.paused_ms : 0), 0);
+    // audio time → wall clock: add the pauses and gaps before that point (the audio has none of them in it)
+    const shift = (ms) => wallOffset(plan.pauses, ms) - ms;
     const t0 = plan.recorded_start, dur = plan.duration_ms, playing = $("audio").dataset.src && ui.lecture && L.media && L.media.id === mediaId;
     const scrim = document.createElement("div");
     scrim.className = "scrim";
@@ -1677,7 +2049,7 @@
     if (document.querySelector(".hold-panel")) return;
     const scrim = document.createElement("div");
     scrim.className = "scrim top";
-    scrim.innerHTML = `<div class="hold-panel"><div class="hhead"><b>확인</b><span class="nsub">앱이 혼자 정하지 못한 파일입니다. 답하면 그 파일만 회차에 연결하고, 파일은 옮기거나 지우지 않습니다.</span><button class="ibtn" data-close="1" title="닫기" aria-label="닫기">✕</button></div><div class="hlist" id="hlist"><div class="hint">불러오는 중…</div></div></div>`;
+    scrim.innerHTML = `<div class="hold-panel"><div class="hhead"><b>확인</b><span class="nsub">앱이 혼자 정하지 못한 파일입니다. 답하면 그 파일만 회차에 연결하고, 파일은 옮기거나 지우지 않습니다.</span><button class="ibtn" data-close="1" title="닫기" aria-label="닫기">${ic("x")}</button></div><div class="hlist" id="hlist"><div class="hint">불러오는 중…</div></div></div>`;
     document.body.appendChild(scrim); keepFocus(scrim);
     const close = () => { scrim.remove(); document.removeEventListener("keydown", key); loadSidebar(); };
     const key = (e) => {
@@ -1688,17 +2060,21 @@
       if (!typing && e.key === "ArrowLeft") go(S.at - 1);
     };
     document.addEventListener("keydown", key);
-    const S = { cards: [], at: 0, done: {}, pick: {}, deferred: 0 };
+    const S = { cards: [], at: 0, done: {}, pick: {}, deferred: 0, auto: [] };
     const box = () => scrim.querySelector("#hlist");
     const evidenceRows = (c) => (c.evidence || []).filter((e) => !["파일", "보류 이유"].includes(e.label))
       .map((e) => `<li><span>${esc(e.label)}</span> ${esc(e.value)}</li>`).join("");
+    /* HOLD-006: what the app's first pass took out (with its reason and 되돌리기), and its recommendation on a card */
+    const autoList = () => S.auto.length ? `<details class="hq-auto"><summary>앱이 먼저 정리한 ${S.auto.length}건 <small>회차에 연결하지 않고 목록에서만 뺐습니다 · 파일은 그대로</small></summary><ul>${S.auto.map((a) =>
+      `<li><b title="${esc(a.path)}">${esc(a.name)}</b><span>${esc(a.why)}</span><span class="link" data-undo="${esc(a.id)}">되돌리기</span></li>`).join("")}</ul></details>` : "";
+    const recLine = (c) => c.recommend ? `<div class="hq-rec">${ic("tick")} <b>앱 추천: ${esc(mdText(c.recommend.date))}</b> <span>${esc(c.recommend.why)}</span></div>` : "";
     function answers(c, i) {
-      const g = c.guesses || {};
+      const g = { ...(c.guesses || {}), ...(c.recommend && c.question === "identity" ? { date: c.recommend.date } : {}) };
       if (c.question === "identity") {
         const pick = S.pick[c.id] || g.course || "";
         return `<div class="hq-group"><div class="hq-lab">과목</div><div class="hq-chips">${(c.folders || []).map((f) =>
           `<button class="chip${f === pick ? " on" : ""}" data-course-pick="${esc(f)}" aria-pressed="${f === pick}">${esc(f)}${f === g.course ? " <small>이름에서 추정</small>" : ""}</button>`).join("")}</div></div>` +
-          `<div class="hq-group"><label class="hq-lab" for="hq-date">수업 날짜</label><input id="hq-date" data-f="date" type="date" value="${esc(g.date || "")}">${g.date ? `<small class="hq-note">파일 이름에서 읽은 날짜입니다. 맞는지 확인하세요.</small>` : ""}</div>` +
+          `<div class="hq-group"><label class="hq-lab" for="hq-date">수업 날짜</label><input id="hq-date" data-f="date" type="date" value="${esc(g.date || "")}">${g.date ? `<small class="hq-note">${c.recommend ? "앱이 추천한 날짜입니다" : "파일 이름에서 읽은 날짜입니다"}. 맞는지 확인하세요.</small>` : ""}</div>` +
           `<details class="hq-more"><summary>그날 같은 과목 수업이 두 번 있었다면</summary><input data-f="session" placeholder="몇 번째 수업인지 (예: 2)" size="18" inputmode="numeric"></details>` +
           `<div class="hq-go"><button class="primary" data-save="${i}">이 회차로 연결</button></div>`;
       }
@@ -1708,7 +2084,9 @@
           `<small class="hq-note">시작 시각을 모르면 기기만 알려 줘도 됩니다. 이 경우 보류로 남을 수 있습니다.</small>`;
       }
       if (c.question === "date" && c.options.length) {
-        return `<div class="hq-choices">${c.options.map((o, j) => `<button class="choice" data-opt="${i}:${j}">${esc(o.label)}</button>`).join("")}</div>` +
+        const rec = c.recommend ? c.recommend.date : "";
+        const order = c.options.map((o, j) => [o, j]).sort((a, b) => (b[0].value.date === rec) - (a[0].value.date === rec));
+        return `<div class="hq-choices">${order.map(([o, j]) => `<button class="choice${o.value.date === rec ? " rec" : ""}" data-opt="${i}:${j}">${esc(o.label)}${o.value.date === rec ? " <small>추천</small>" : ""}</button>`).join("")}</div>` +
           `<div class="hq-group hq-inline"><label class="hq-lab" for="hq-other">다른 날짜</label><input id="hq-other" data-f="other" type="date"><button class="ghost" data-other="${i}">이 날짜로</button></div>`;
       }
       if (c.options.length) return `<div class="hq-choices">${c.options.map((o, j) => `<button class="choice" data-opt="${i}:${j}">${esc(o.label)}</button>`).join("")}</div>`;
@@ -1718,7 +2096,7 @@
       const n = S.cards.length;
       if (!n) {
         box().innerHTML = `<div class="hq-empty"><svg style="width:34px;height:34px;color:var(--faint)"><use href="#i-check"/></svg><b>확인할 것이 없습니다</b>` +
-          `<span>${S.deferred ? `나중에 보기로 한 ${S.deferred}개는 내일 다시 묻습니다.` : "앱이 모든 파일을 스스로 정리했습니다."}</span><button class="ghost" data-close="1">닫기</button></div>`;
+          `<span>${S.deferred ? `나중에 보기로 한 ${S.deferred}개는 내일 다시 묻습니다.` : "앱이 모든 파일을 스스로 정리했습니다."}</span><button class="ghost" data-close="1">닫기</button></div>` + autoList();
         return;
       }
       S.at = Math.max(0, Math.min(S.at, n - 1));
@@ -1734,10 +2112,10 @@
         `<div class="hq-what"><span class="hkind">${esc(HOLD_KIND[c.kind] || "파일")}</span><b class="hfile" title="${esc((c.items[0] || {}).path || "")}">${esc(c.file || (c.items[0] || {}).name || "")}</b></div>` +
         `<div class="hq-why"><span>왜 묻나요</span>${esc(c.reason_ko || "")}</div>` +
         (ev ? `<ul class="hq-ev">${ev}</ul>` : "") + same + pv +
-        `<h3 class="hq-ask">${esc(c.text)}</h3>` +
+        `<h3 class="hq-ask">${esc(c.text)}</h3>` + (done ? "" : recLine(c)) +
         (done ? `<div class="hres">${done}</div>` : `<div class="hq-ans">${answers(c, i)}</div><div class="hres" id="hres"></div>`) +
         `<div class="hq-foot">${done ? "" : `<button class="ghost" data-later="${i}" title="내일 다시 묻습니다">나중에</button><button class="ghost subtle" data-reject="${i}">학습 대상 아님</button>`}` +
-        `<span class="grow"></span><button class="ghost" data-prev="1"${i ? "" : " disabled"}>‹ 이전</button><button class="${done ? "primary" : "ghost"}" data-next="1"${i < n - 1 ? "" : " disabled"}>다음 ›</button></div></div>`;
+        `<span class="grow"></span><button class="ghost" data-prev="1"${i ? "" : " disabled"}>‹ 이전</button><button class="${done ? "primary" : "ghost"}" data-next="1"${i < n - 1 ? "" : " disabled"}>다음 ›</button></div></div>` + autoList();
       const first = scrim.querySelector(done ? '[data-next="1"]:not([disabled])' : ".hq-ans button, .hq-ans input");
       if (first) first.focus({ preventScroll: true });
     }
@@ -1745,7 +2123,7 @@
     const load = async () => {
       const r = await api.holds();
       if (!r.ok) { box().innerHTML = `<div class="hint">${esc(r.error)}</div>`; return; }
-      S.cards = r.cards || []; S.deferred = r.deferred || 0; draw();
+      S.cards = r.cards || []; S.deferred = r.deferred || 0; S.auto = r.auto || []; draw();
     };
     const ids = (i) => S.cards[i].items.map((x) => x.id);
     const say = (html) => { const el = scrim.querySelector("#hres"); if (el) el.innerHTML = html; };
@@ -1755,7 +2133,7 @@
       const r = await api.hold_answer(ids(i), value);
       if (!r.ok) { say(`<span class="err">${esc(r.error)}</span>`); scrim.querySelectorAll(".hq-ans button").forEach((b) => { b.disabled = false; }); return; }
       const lines = r.outcome.map((o) => o.state === "confirmed"
-        ? `<div class="ok-line">✓ ${esc(o.course || "")} ${o.date ? mdText(o.date) : ""}에 연결했습니다 — ${esc(o.next || "연결됨")}${o.lecture_id ? ` <span class="link" data-go="${o.lecture_id}">회차 열기</span>` : ""}</div>`
+        ? `<div class="ok-line">${ic("tick")} ${esc(o.course || "")} ${o.date ? mdText(o.date) : ""}에 연결했습니다 — ${esc(o.next || "연결됨")}${o.lecture_id ? ` <span class="link" data-go="${o.lecture_id}">회차 열기</span>` : ""}</div>`
         : `<div>아직 정하지 못했습니다: ${esc(o.reason || "")} <span class="link" data-undo="${o.id}">답 되돌리기</span></div>`);
       S.done[S.cards[i].id] = lines.join("");
       draw(); loadSidebar();
@@ -1802,7 +2180,10 @@
   }
 
   /* A note is untrusted HTML (security review 2026-11-05): the frame is sandboxed without allow-scripts, and this
-     policy goes first so nothing in the note can run scripts, fetch, embed plugins or change the base address. */
+     policy goes first so nothing in the note can run scripts, fetch, embed plugins or change the base address.
+     A srcdoc frame also inherits the window's own policy (index.html) and a load must pass both, so whatever this
+     one allows on purpose (data: pictures, fonts and sound) has to be allowed there as well
+     (tests/test_release_csp.py tries the pair against the engine). */
   const NOTE_CSP = `<meta http-equiv="Content-Security-Policy" content="script-src 'none'; connect-src 'none'; object-src 'none'; base-uri 'none'; form-action 'none'; img-src 'self' data:; font-src 'self' data:; media-src 'self' data:; style-src 'self' 'unsafe-inline'; frame-src 'none'">`;
   /* organized HTML note: full window by default, Esc shrinks (user 2026-09-29) */
   async function showHtml(note) {
@@ -1880,54 +2261,6 @@
       });
   }
 
-  /* 나란히 비교 (user 2026-11-14): two engines' transcripts side by side, rows follow the left one by time;
-     words found in only one side are marked. Either side can become the 사용본 from here. */
-  async function compareTranscripts() {
-    const L = ui.lecture, list = L.transcripts.filter((t) => t.segments);
-    if (list.length < 2) return;
-    const use = list.find((t) => t.in_use) || list[0];
-    const pick = { a: use.id, b: (list.find((t) => t.id !== use.id) || list[1]).id };
-    const scrim = document.createElement("div");
-    scrim.className = "scrim cmp-scrim";
-    scrim.innerHTML = `<div class="cmp-panel"><div class="cal-head"><b>전사본 나란히 비교</b><small class="room-sub">같은 시각의 말을 한 줄에 · 한쪽에만 있는 낱말은 색으로</small><span class="grow"></span><button class="ibtn" data-c="close" title="닫기">✕</button></div><div class="cmp-top" id="cmpTop"></div><div class="cmp-body" id="cmpBody"><div class="hint">불러오는 중…</div></div></div>`;
-    document.body.appendChild(scrim); keepFocus(scrim);
-    const close = () => { scrim.remove(); document.removeEventListener("keydown", key); };
-    const key = (e) => { if (e.key === "Escape" && isTop(scrim)) close(); };
-    document.addEventListener("keydown", key);
-    const norm = (w) => w.replace(/^[“"'(]+|[.,?!·…"”')]+$/g, "");  // edge punctuation only: 0.02 stays one word
-    const words = (s) => String(s || "").split(/\s+/).map(norm).filter(Boolean);
-    const marked = (text, other) => text.split(/(\s+)/).map((w) => (!w.trim() || other.has(norm(w)) ? esc(w) : `<mark class="cmp-d">${esc(w)}</mark>`)).join("");
-    const draw = async () => {
-      const opts = (cur) => list.map((t) => `<option value="${esc(t.id)}"${t.id === cur ? " selected" : ""}>${esc(t.label)}</option>`).join("");
-      const useBtn = (id) => (id === use.id ? `<span class="cmp-use">사용본</span>` : `<button class="ghost" data-use="${esc(id)}">이쪽을 사용본으로</button>`);
-      scrim.querySelector("#cmpTop").innerHTML = `<div class="cmp-col"><select data-side="a">${opts(pick.a)}</select>${useBtn(pick.a)}</div><div class="cmp-col"><select data-side="b">${opts(pick.b)}</select>${useBtn(pick.b)}</div>`;
-      const [ra, rb] = await Promise.all([api.transcript(pick.a), api.transcript(pick.b)]);
-      const A = ra.segments || [], B = rb.segments || [];
-      if (!A.length || !B.length) { scrim.querySelector("#cmpBody").innerHTML = `<div class="hint">전사 내용을 불러오지 못했습니다.</div>`; return; }
-      let k = 0, diff = 0;
-      const rows = A.map((g, i) => {
-        const until = i + 1 < A.length ? A[i + 1].start_ms : Infinity, right = [];
-        while (k < B.length && B[k].start_ms < until) right.push(B[k++]);
-        const ta = g.text, tb = right.map((x) => x.text).join(" ");
-        const wa = new Set(words(ta)), wb = new Set(words(tb));
-        const la = marked(ta, wb), lb = tb ? marked(tb, wa) : `<span class="faint">(이 시각에 들은 말 없음)</span>`;
-        diff += (la.match(/cmp-d/g) || []).length + (lb.match(/cmp-d/g) || []).length;
-        return `<div class="cmp-row"><div class="t num" data-seek="${g.start_ms}">${clock(g.start_ms)}</div><div class="cx">${la}</div><div class="cx">${lb}</div></div>`;
-      });
-      scrim.querySelector("#cmpBody").innerHTML = `<div class="cmp-sum">${A.length}문단 · 한쪽에만 있는 낱말 ${diff}곳 — 시각을 누르면 그 자리부터 들을 수 있습니다</div>` + rows.join("");
-    };
-    scrim.addEventListener("change", (e) => { const s = e.target.closest("select[data-side]"); if (!s) return; pick[s.dataset.side] = s.value; draw(); });
-    scrim.addEventListener("click", async (e) => {
-      if (e.target === scrim || e.target.closest('[data-c="close"]')) return close();
-      const t = e.target.closest("[data-seek],[data-use]"); if (!t) return;
-      if (t.dataset.seek) { close(); return jumpTo(+t.dataset.seek, true); }
-      const r = await api.choose_transcript(L.id, t.dataset.use);
-      if (!r.ok) { toast(r.error); return; }
-      toast("사용본을 바꿨습니다(이력 기록)"); close(); openLecture(L.id);
-    });
-    draw();
-  }
-
   async function transcribeLecture() {
     const L = ui.lecture, rec = L.recordings.find((r) => r.exists);
     if (!rec) { toast("연결된 녹음 파일을 찾지 못했습니다"); return; }
@@ -1957,7 +2290,7 @@
     return (a ? "…" : "") + esc(t.slice(a, i)) + `<mark>${esc(q)}</mark>` + esc(t.slice(i + q.length, b)) + (b < t.length ? "…" : "");
   }
   /* ---------- calendar: exams · quizzes · assignments · closures · personal (sources: user / eTL / class speech) ---------- */
-  const KIND_OPTIONS = [["exam", "시험"], ["quiz", "퀴즈"], ["assignment", "과제"], ["closure", "휴강"], ["personal", "개인"], ["other", "기타"]];
+  const KIND_OPTIONS = [["exam", "시험"], ["quiz", "퀴즈"], ["assignment", "과제"], ["presentation", "발표"], ["report", "보고서"], ["closure", "휴강"], ["personal", "개인"], ["other", "기타"]];
   const dday = (n) => (n === 0 ? "D-day" : n > 0 ? `D-${n}` : `D+${-n}`);
   const hhmm = (ms) => (ms === null || ms === undefined ? "" : `${String(Math.floor(ms / 3600000)).padStart(2, "0")}:${String(Math.floor(ms % 3600000 / 60000)).padStart(2, "0")}`);
   async function loadExamChip() {
@@ -1976,7 +2309,7 @@
     if (document.querySelector(".notes-panel")) return;
     const scrim = document.createElement("div");
     scrim.className = "scrim";
-    scrim.innerHTML = `<div class="exam-panel notes-panel"><div class="hhead"><b>정리본 모음</b><span class="nsub">회차마다 만든 정리본입니다. 누르면 앱에서 열고, [브라우저]는 평소 쓰는 브라우저로 엽니다.</span><button class="ibtn" data-close="1" title="닫기" aria-label="닫기">✕</button></div><div class="exam-body"><div class="exam-courses" id="ncCourses"></div><div class="exam-main" id="ncMain"><div class="hint">불러오는 중…</div></div></div></div>`;
+    scrim.innerHTML = `<div class="exam-panel notes-panel"><div class="hhead"><b>정리본 모음</b><span class="nsub">회차마다 만든 정리본입니다. 누르면 앱에서 열고, [브라우저]는 평소 쓰는 브라우저로 엽니다.</span><button class="ibtn" data-close="1" title="닫기" aria-label="닫기">${ic("x")}</button></div><div class="exam-body"><div class="exam-courses" id="ncCourses"></div><div class="exam-main" id="ncMain"><div class="hint">불러오는 중…</div></div></div></div>`;
     document.body.appendChild(scrim); keepFocus(scrim);
     const S = { data: null, course: folder || null };
     const close = () => { scrim.remove(); document.removeEventListener("keydown", key); window.__lecturehubNotesChanged = null; };
@@ -2036,7 +2369,7 @@
     if (document.querySelector(".exam-panel")) return;
     const scrim = document.createElement("div");
     scrim.className = "scrim";
-    scrim.innerHTML = `<div class="exam-panel"><div class="hhead"><b>시험 대비</b><span class="nsub">달력에서 확정한 일정만 날짜로 셉니다. 수업 중 들린 날짜는 확인 전까지 후보입니다.</span><button class="ibtn" data-close="1" title="닫기">✕</button></div><div class="exam-body"><div class="exam-courses" id="exCourses"></div><div class="exam-main" id="exMain"></div></div></div>`;
+    scrim.innerHTML = `<div class="exam-panel"><div class="hhead"><b>시험 대비</b><span class="nsub">달력에서 확정한 일정만 날짜로 셉니다. 수업 중 들린 날짜는 확인 전까지 후보입니다.</span><button class="ibtn" data-close="1" title="닫기">${ic("x")}</button></div><div class="exam-body"><div class="exam-courses" id="exCourses"></div><div class="exam-main" id="exMain"></div></div></div>`;
     document.body.appendChild(scrim); keepFocus(scrim);
     const S = { data: null, course: folder || null, adding: false };
     const close = () => { scrim.remove(); document.removeEventListener("keydown", key); loadExamChip(); };
@@ -2054,7 +2387,7 @@
       const pages = c.pages || [];
       const rows = pages.map((g) => `<div class="exrow page${g.missing ? " missing" : ""}"><button class="ghost primary" data-page-open="${esc(g.id)}"${g.missing ? " disabled" : ""}>${esc(g.title)}</button>` +
         `<small class="ptarget" title="${esc(g.target)}">${g.kind === "artifact" ? "claude.ai 아티팩트" : esc(g.missing ? "파일 없음 · " + g.path : g.path)}</small>` +
-        `<button class="ibtn" data-page-del="${esc(g.id)}" title="링크 빼기 (페이지는 지우지 않음)">✕</button></div>`).join("");
+        `<button class="ibtn" data-page-del="${esc(g.id)}" title="링크 빼기 (페이지는 지우지 않음)" aria-label="링크 빼기">${ic("x")}</button></div>`).join("");
       const form = S.adding
         ? `<div class="exacts page-add"><input class="ask" data-page-target="1" placeholder="https://claude.ai/artifact/… 또는 학기 폴더 안 .html" spellcheck="false" autocomplete="off">` +
           `<button class="ghost" data-page-pick="1">파일 고르기</button></div>` +
@@ -2077,7 +2410,6 @@
           `<div class="hint">이름에 '대비'·'시험'·'문제'가 든 HTML이 과목 폴더나 정리본에 없습니다.</div>`) + `</div>` +
         `<div class="exsec"><h5>수업 중 발언<small>전사에 실제로 있는 말만 — 누르면 그 대목으로 갑니다</small></h5>` + (c.cues.map((u) => `<div class="exrow cue" data-lecture="${u.lecture_id}" data-at="${u.at_ms}"><b class="num">${esc(mdText(u.date))} ${clock(u.at_ms)}</b><span class="b cue">${esc(u.kind_label)}</span><small>${esc(u.by_label)}</small><p>“${esc(u.quote)}”${u.note ? `\n${esc(u.note)}` : ""}</p></div>`).join("") ||
           `<div class="hint">전사에서 찾은 시험 관련 발언이 없습니다.</div>`) + `</div>`;
-      if (window.LHGerman) window.LHGerman.mountExam(box, c.folder, toast);  // 암기장 열기(german.js, P-037)
       const input = S.adding && box.querySelector("[data-page-target]"); if (input) input.focus();
     };
     const load = async () => {
@@ -2132,52 +2464,28 @@
     });
     load();
   }
-  /* assignment helper (user request 2026-09-29): gather files + notes, then a Claude Code session does the writing */
-  async function prepareAssignment(id) {
-    toast("과제 자료를 모으는 중…");
-    let r = await api.assignment_prepare(id);
-    if (r.ok && r.need_consent) {
-      // stored consent: the native window hands out a one-time token (security review 2026-11-05)
-      const q = await api.consent_confirm("claude_assignment", r.need_consent);
-      if (!q.ok) { toast(q.error); return; }
-      if (!q.yes) return;
-      const c = await api.assignment_consent(r.need_consent, q.token);
-      if (!c.ok) { toast(c.error); return; }
-      r = await api.assignment_prepare(id);
-    }
-    if (!r.ok) { toast(r.error); return; }
-    const n = r.counts;
-    const body = `과제 파일 ${n.assignment} · 작성요령 ${n.guide} · 강의계획서 ${n.syllabus} · 수업 ${r.lectures}회` +
-      (r.top_lectures.length ? `\n관련 높은 수업: ${r.top_lectures.map(mdText).join(", ")}` : "") + `\n${r.ai_policy}` +
-      (r.etl ? "" : "\neTL 과제 설명은 가져오지 못했습니다(eTL 연결 전이면 Claude가 내용을 물어봅니다).") +
-      "\n\nClaude Code 창에서 과제 내용을 정리해 보여 주고, 모르는 것만 묻고 초안을 씁니다.";
-    const go = await dialog({ title: "과제 묶음을 만들었습니다", body, ok: "Claude Code로 시작", cancel: "닫기" });
-    if (!go) return;
-    const x = await api.assignment_claude(id);
-    toast(x.ok ? "Claude Code 창을 열었습니다" : x.error);
-  }
-
   function openCalendar(year, month, pick) {
     const now = new Date();
     const state = { year: year || now.getFullYear(), month: month || now.getMonth() + 1, data: null, editing: null };
     document.querySelectorAll(".cal-scrim").forEach((s) => s.remove());
     const scrim = document.createElement("div");
     scrim.className = "scrim cal-scrim";
-    scrim.innerHTML = `<div class="cal-panel compact"><div class="cal-head"><b id="calTitle">일정</b><span class="grow"></span><button class="ghost" data-c="add">+ 일정 추가</button><button class="ibtn" data-c="close" title="닫기">✕</button></div><div class="cal-body"><div class="cal-grid" id="calGrid"></div><div class="cal-side" id="calSide"></div></div></div>`;
+    scrim.innerHTML = `<div class="cal-panel compact"><div class="cal-head"><b id="calTitle">일정</b><span class="grow"></span><button class="ghost" data-c="add">+ 일정 추가</button><button class="ibtn" data-c="close" title="닫기">${ic("x")}</button></div><div class="cal-body"><div class="cal-grid" id="calGrid"></div><div class="cal-side" id="calSide"></div></div></div>`;
     document.body.appendChild(scrim); keepFocus(scrim);
-    const close = () => { scrim.remove(); document.removeEventListener("keydown", key); loadNotices(); if (ui.view === "home") renderHome(); else loadExamChip(); };
+    const close = () => { scrim.remove(); ui.calendarReload = null; document.removeEventListener("keydown", key); loadNotices(); if (ui.view === "home") renderHome(); else loadExamChip(); };
     const key = (e) => { if (e.key === "Escape" && isTop(scrim)) close(); };
     document.addEventListener("keydown", key);
     const load = async () => {
       const [r, etl, board] = await Promise.all([api.calendar(state.year, state.month), api.etl_status(), api.etl_board()]);
       state.data = r; state.etl = etl.ok ? etl : null; state.board = board.ok ? board : null;
       if (pick && r.ok) {  // opened from the start screen: that day's form or that event
-        const ev = pick.id && [...r.events, ...r.upcoming, ...r.candidates].find((x) => x.id === pick.id);
+        const ev = pick.id && [...r.events, ...r.upcoming, ...r.candidates, ...(r.submitted || [])].find((x) => x.id === pick.id);
         state.editing = ev ? { ...ev } : pick.day ? { kind: "exam", date: pick.day, course_id: pick.course_id || null } : null;
         pick = null;
       }
       draw();
     };
+    ui.calendarReload = () => { if (document.body.contains(scrim)) load(); else ui.calendarReload = null; };
     const ago = (s) => { const m = Math.round((Date.now() / 1000 - s) / 60); return m < 1 ? "방금" : m < 60 ? `${m}분 전` : m < 1440 ? `${Math.round(m / 60)}시간 전` : `${Math.round(m / 1440)}일 전`; };
     const etlLine = () => {
       const e = state.etl;
@@ -2202,25 +2510,41 @@
           : `<span class="link" data-etlf="${f.big ? "big" : "take"}" data-id="${f.id}">${f.state === "local" ? "과목 폴더로 옮기기" : "받기"}</span>`;
         const detail = f.state === "changed"
           ? `<b>${esc(f.hint)}</b><br>내 파일 ${size(f.mine_size)} · 받은 때 ${esc(f.mine_created.replace("T", " "))} · 고친 때 ${esc(f.mine_changed.replace("T", " "))}<br>eTL 파일 ${size(f.size)} · 올라온 때 ${esc(f.updated.replace("T", " "))}`
-          : `${size(f.size)} · eTL ${esc(f.updated.slice(0, 10))}${f.big ? " · 큰 파일" : ""}`;
-        return `<div class="ef ${f.state}"><div><b>${esc(f.course)}</b> ${esc(f.name)} <small>${f.state === "changed" ? who[f.case] : what[f.state]}</small></div><div class="nsub">${detail}</div><div class="eacts">${acts}</div></div>`;
+          : `${size(f.size)} · eTL ${esc(f.updated.slice(0, 10))}${f.big ? " · 큰 파일" : ""}${f.where ? " · " + esc(f.where) : ""}`;
+        return `<div class="ef ${f.state}"><div><b>${esc(f.course)}</b> ${esc(f.name)} <small>${f.state === "changed" ? who[f.case] : what[f.state]}${f.where ? " · 게시판 첨부" : ""}</small></div><div class="nsub">${detail}</div><div class="eacts">${acts}</div></div>`;
       }).join("");
+      /* course boards (게시판 tab): read on [게시판 확인] or once a week (user 2026-11-20) */
+      const pc = b.post_check || {}, posts = (b.posts || []).slice(0, state.allPosts ? 30 : 5);
+      const postRows = posts.map((p) =>
+        `<div class="ann${open.has(p.id) ? " open" : ""}" data-ann="${esc(p.id)}"><div class="ah"><span class="num">${esc(mdText(p.posted.slice(0, 10)))}</span><b>${esc(p.course)}</b><span>${esc(p.title)}<small> · ${esc(p.board)}</small></span></div>` +
+        (open.has(p.id) ? `<div class="at">${esc(p.text)}<div class="nsub">${esc(p.author)}${p.attachments ? ` · 첨부 ${p.attachments}개` : ""} · eTL 게시판에서 보기: ${esc(p.url)}</div></div>` : "") + `</div>`).join("");
+      const checked = pc.ok_at ? `${ago(pc.ok_at)} 확인` : "아직 확인 안 함";
+      const postHead = `<div class="sl">eTL 게시판 <small>${checked}${pc.error && (!pc.ok_at || pc.error_at > pc.ok_at) ? ` · <span class="warn">${esc(pc.error)}</span>` : ""}</small> <span class="link" data-c="board-check">게시판 확인</span>${(b.posts || []).length > 5 && !state.allPosts ? ` <span class="link" data-c="posts-all">전체 ${b.posts.length}건</span>` : ""}</div>`;
       return `<div class="sl">eTL 공지${b.announcements.length > 5 && !state.allAnn ? ` <span class="link" data-c="ann-all">전체 ${b.announcements.length}건</span>` : ""}</div>${notes || `<div class="hint">가져온 공지가 없습니다.</div>`}` +
-        `<div class="sl">eTL 자료 — 과목 폴더에 없는 것 ${b.files.length}개 <small>(있는 것 ${b.have} / 전체 ${b.total})</small></div>${files || `<div class="hint">${b.total ? "eTL에 올라온 파일이 모두 과목 폴더에 있습니다." : "아직 파일 목록을 가져오지 않았습니다. [지금 가져오기]를 누르세요."}</div>`}` +
+        (!ed("etl_board") ? "" : postHead) + (!ed("etl_board") ? "" : postRows || `<div class="hint">${pc.ok_at ? "게시판에 글이 없습니다." : "과제 탭·공지에 없고 게시판에만 올라오는 글이 있습니다. [게시판 확인]을 누르면 읽어 옵니다(앱이 열려 있으면 하루 한 번 저절로 읽고, 새 글은 위에 알려 줍니다)."}</div>`) +
+        `<div class="sl">eTL 자료 — 과목 폴더에 없는 것 ${b.files.length}개 <small>(있는 것 ${b.have} / 전체 ${b.total})</small>${b.files.some((f) => f.state !== "changed" && !f.big) ? ` <span class="link" data-etlf="all" data-id="0">빠진 파일 모두 받기 (${b.files.filter((f) => f.state !== "changed" && !f.big).length}개)</span>` : ""}</div>${files || `<div class="hint">${b.total ? "eTL에 올라온 파일이 모두 과목 폴더에 있습니다." : "아직 파일 목록을 가져오지 않았습니다. [지금 가져오기]를 누르세요."}</div>`}` +
         (b.closed.length ? `<div class="nsub">파일 목록을 열어 두지 않은 과목: ${esc(b.closed.join(", "))}</div>` : "");
     };
     const etlFile = async (t) => {
       const id = +t.dataset.id, how = t.dataset.etlf;
+      if (how === "all") {  // 다운로드 폴더에 있으면 옮기고, 없으면 받는다. 크기가 다른 내 파일·큰 파일은 그대로
+        toast("eTL 파일을 모두 넣는 중…");
+        const r = await api.etl_file_take_all();
+        if (r.message) { toast(r.message); return; }
+        toast(r.ok ? `받음 ${r.downloaded}개 · 옮김 ${r.moved}개` + (r.failed.length ? ` · 못 넣음 ${r.failed.length}개: ${r.failed.map((f) => f.name + " (" + f.error + ")").join(", ")}` : "") : r.error);
+        return load();
+      }
       if (how === "keep") { const r = await api.etl_file_keep(id); if (!r.ok) toast(r.error); return load(); }
       if (how === "big" && !(await dialog({ title: "큰 파일입니다 — 받을까요?", body: "용량이 커서 시간이 걸립니다. 과목 폴더에 그대로 저장합니다.", ok: "받기" }))) return;
       toast("eTL 파일을 넣는 중…");
       const r = await api.etl_file_take(id, how === "beside", how === "big");
-      toast(r.ok ? `${r.state === "moved" ? "다운로드 폴더에서 옮겼습니다" : "받았습니다"} · ${r.name}` : r.error);
+      toast(r.message || (r.ok ? `${r.state === "moved" ? "다운로드 폴더에서 옮겼습니다" : "받았습니다"} · ${r.name}` : r.error));
       load();
     };
     const etlSync = async (token) => {
       toast("eTL에서 과제를 가져오는 중…");
       const r = await api.etl_sync(true, token || null);
+      if (r.message) { toast(r.message); return; }
       if (!r.ok) { toast(r.error); load(); return; }
       toast(`eTL 과제 ${r.count}건 확인 · 새로 ${r.added}건, 날짜 바뀜 ${r.updated}건` + (r.board ? ` · 공지 ${r.board.announcements}건 · 파일 ${r.board.files}개` : r.board_error ? ` · ${r.board_error}` : "") + (r.unmatched && r.unmatched.length ? ` · 시간표에 없는 과목: ${r.unmatched.join(", ")}` : ""));
       load();
@@ -2242,24 +2566,30 @@
       let html = "월화수목금토일".split("").map((d) => `<div class="dow">${d}</div>`).join("") + "<div></div>".repeat(lead);
       for (let d = 1; d <= days; d++) {
         const iso = `${state.year}-${String(state.month).padStart(2, "0")}-${String(d).padStart(2, "0")}`;
-        const items = (byDay[iso] || []).slice(0, 3).map((e) => `<div class="ev k-${e.kind}${e.source === "etl" ? " etl" : ""}" data-edit="${e.id}" title="${esc(e.title + (e.note ? " — " + e.note : ""))}">${e.start_ms !== null ? hhmm(e.start_ms) + " " : ""}${e.course ? esc(e.course) + " " : ""}${esc(e.kind_label)}${e.date_precision === "approx" ? "(쯤)" : ""}</div>`).join("");
+        const items = (byDay[iso] || []).slice(0, 3).map((e) => `<div class="${evClass(e)}" data-edit="${e.id}" title="${esc(e.title + (evMissing(e) ? " — 누락(eTL에서 아직 안 냄)" : "") + (e.date_precision === "approx" ? " — 날짜는 대략" : "") + (e.note ? " — " + e.note : ""))}">${e.start_ms !== null ? hhmm(e.start_ms) + " " : ""}${e.course ? esc(e.course) + " " : ""}${esc(evLabel(e))}</div>`).join("");
         const more = (byDay[iso] || []).length > 3 ? `<div class="more">+${byDay[iso].length - 3}</div>` : "";
-        const ex = (exc[iso] || []).map((e) => `<div class="ex" title="${esc(e.note)}">${esc(e.course)} ${esc(e.kind)}${e.confirmation === "confirmed_by_user" ? "" : "(추정)"}</div>`).join("");
+        const ex = (exc[iso] || []).map((e) => `<div class="ex" title="${esc([e.course + " " + e.kind, e.confirmation === "confirmed_by_user" ? "" : "확인 전(추정)", e.note].filter(Boolean).join(" · "))}">${esc(e.course)} ${esc(e.kind)}</div>`).join("");
         html += `<div class="day${iso === r.today ? " today" : ""}" data-day="${iso}"${dayAttrs(iso, r.today, (byDay[iso] || []).length)}><span class="n">${d}</span>${ex}${items}${more}</div>`;
       }
       scrim.querySelector("#calGrid").innerHTML = html;
       const masked = document.body.classList.contains("masked");
-      const hw = (e) => (e.kind === "assignment" && ed("assignment") && e.d_day >= 0 ? `<span class="hw-acts"><button class="mini" data-hw="${e.id}" title="과제 파일·작성요령·관련 수업 노트를 모아 Claude Code로 과제를 시작합니다">과제 준비</button><button class="mini" data-hwopen="${e.id}" title="모아 둔 과제 폴더 열기">폴더</button></span>` : "");
-      const up = r.upcoming.map((e) => `<div class="up" data-edit="${e.id}"><span class="dd">${dday(e.d_day)}</span><span>${e.course ? esc(e.course) + " · " : ""}${esc(e.title)}<small>${mdText(e.date)}${e.start_ms !== null ? " " + hhmm(e.start_ms) : ""}${e.source === "etl" ? " · eTL" : ""}${e.note && e.source !== "etl" ? " · " + esc(e.note) : ""}</small>${hw(e)}</span></div>`).join("") || `<div class="hint">60일 안에 잡힌 일정이 없습니다.</div>`;
+      const up = r.upcoming.map((e) => `<div class="up" data-edit="${e.id}"><span class="dd${evMissing(e) ? " missing" : ""}">${evMissing(e) ? "누락" : dday(e.d_day)}</span><span>${e.course ? esc(e.course) + " · " : ""}${esc(e.title)}<small>${mdText(e.date)}${e.date_precision === "approx" ? " 쯤" : ""}${e.start_ms !== null ? " " + hhmm(e.start_ms) : ""}${e.source === "etl" ? " · eTL" : ""}${e.by_ai_app ? " · AI 앱이 넣음" : ""}${e.submission && e.submission.state === "graded" ? " · " + esc(e.submission.label) : ""}${e.note && e.source !== "etl" ? " · " + esc(e.note) : ""}</small></span></div>`).join("") || `<div class="hint">60일 안에 잡힌 일정이 없습니다.</div>`;
       const cand = r.candidates.map((c) => {
         const ev = c.evidence || {};
-        return `<div class="cand"><div><b>${c.course ? esc(c.course) + " · " : ""}${esc(c.kind_label)} ${esc(c.date_text || mdText(c.date))}</b> <small>${esc(c.title)}${ev.engines_agree > 1 ? ` · 엔진 ${ev.engines_agree}개 일치` : " · 한 엔진만"}</small></div>` +
-          `<div class="q">${masked ? "(전사 가림 — 전사 탭의 [전사 보기]를 누르면 인용이 보입니다)" : "“" + esc(ev.quote || "") + "”"}</div>` +
+        const where = ev.announcement ? ` · eTL 공지 '${esc(ev.title || "")}' ${esc(mdText((ev.posted || "").slice(0, 10)))} · ChatGPT(Codex)가 읽음`
+          : ev.post_id ? ` · eTL 게시판 '${esc(ev.board)}' ${esc(mdText((ev.posted || "").slice(0, 10)))}` : ev.engines_agree > 1 ? ` · 엔진 ${ev.engines_agree}개 일치` : " · 한 엔진만";
+        return `<div class="cand"><div><b>${c.course ? esc(c.course) + " · " : ""}${esc(c.kind_label)} ${esc(c.date_text || mdText(c.date))}</b> <small>${esc(c.title)}${where}${ev.lecture_id ? ` · 녹음 ${clock(ev.at_ms || 0)}` : ""}</small></div>` +
+          `<div class="q">${masked && !ev.post_id ? "(전사 가림 — 전사 탭의 [전사 보기]를 누르면 인용이 보입니다)" : "“" + esc(ev.quote || "") + "”"}</div>` +
           `<div class="acts">${ev.lecture_id ? `<button class="ghost" data-go="${ev.lecture_id}" data-ms="${ev.at_ms || 0}">전사로 가기</button>` : ""}<button class="ghost" data-edit="${c.id}">날짜 고쳐서 확정</button><button class="primary" data-confirm="${c.id}">확정</button><button class="ghost" data-dismiss="${c.id}">무시</button></div></div>`;
       }).join("");
+      const age = etlAge(r), done = r.submitted || [];
+      const missing = (r.missing || []).map((m) => missingRow(m).replace(' data-cands="1"', "")).join("");
+      const handed = done.length ? fold("cal-submitted", "제출함", done.map((e) => submittedRow(e, "data-edit")).join(""), { count: `${done.length}건`, cls: "sub-fold" }) : "";
       scrim.querySelector("#calSide").innerHTML = (state.editing ? form() : "") +
-        `<div class="sl">다가오는 일정</div>${up}` + (cand ? `<div class="sl">확인 필요 — 수업 중 언급 ${r.candidates.length}건</div>${cand}` : "") +
-        etlLine() + etlBoard() + `<div class="src">출처: 직접 입력 · eTL 과제 마감·공지·자료 목록(읽기만, 받기는 누를 때만) · 수업 중 발언(확정 전까지 후보)</div>`;
+        `<div class="sl">다가오는 일정${age ? ` <small class="age">${esc(age)}</small>` : ""}</div>${up}` +
+        (missing ? `<div class="sl miss-h">누락 — eTL에서 아직 안 낸 과제 ${r.missing.length}건</div>${missing}` : "") + handed +
+        (cand ? `<div class="sl">확인 필요 — 수업 중 언급·게시판 글·eTL 공지 ${r.candidates.length}건</div>${cand}` : "") +
+        etlLine() + etlBoard() + `<div class="src">출처: 직접 입력 · eTL 과제 마감·공지·게시판·자료 목록(읽기만, 받기는 누를 때만) · 수업 중 발언·게시판 글의 날짜(확정 전까지 후보)</div>`;
     };
     const form = () => {
       const e = state.editing, r = state.data;
@@ -2274,20 +2604,29 @@
     };
     const values = () => ({ kind: scrim.querySelector("#fKind").value, course_id: scrim.querySelector("#fCourse").value, title: scrim.querySelector("#fTitle").value,
       date: scrim.querySelector("#fDate").value, start: scrim.querySelector("#fStart").value, end: scrim.querySelector("#fEnd").value, note: scrim.querySelector("#fNote").value });
-    const findEvent = (id) => { const r = state.data; return [...r.events, ...r.upcoming, ...r.candidates].find((x) => x.id === id); };
+    const findEvent = (id) => { const r = state.data; return [...r.events, ...r.upcoming, ...r.candidates, ...(r.submitted || [])].find((x) => x.id === id); };
+    scrim.addEventListener("toggle", (e) => {
+      if (e.target.matches && e.target.matches("details[data-fold]")) settingsView.folds[e.target.dataset.fold] = e.target.open;
+    }, true);
     scrim.addEventListener("click", async (e) => {
       if (e.target === scrim) { close(); return; }
-      const t = e.target.closest("[data-c],[data-hw],[data-hwopen],[data-edit],[data-confirm],[data-dismiss],[data-go],[data-day],[data-etlf],[data-ann]"); if (!t) return;
+      const t = e.target.closest("[data-c],[data-edit],[data-confirm],[data-dismiss],[data-go],[data-day],[data-etlf],[data-ann]"); if (!t) return;
       const c = t.dataset.c;
       if (t.dataset.etlf) return etlFile(t);
       if (t.dataset.ann) { const o = state.openAnn; o.has(t.dataset.ann) ? o.delete(t.dataset.ann) : o.add(t.dataset.ann); return draw(); }
       if (c === "ann-all") { state.allAnn = true; return draw(); }
+      if (c === "posts-all") { state.allPosts = true; return draw(); }
+      if (c === "board-check") {
+        toast("eTL 게시판을 읽는 중…");
+        const r = await api.etl_board_check();
+        toast(r.ok ? `게시판 글 ${r.posts}건 확인 · 달력 후보 새로 ${r.candidates_added}건` + (r.failed.length ? ` · 못 읽은 과목: ${r.failed.join(", ")}` : "") : r.error);
+        loadNotices();  // new posts go to the banner on top
+        return load();
+      }
       if (c === "close") return close();
-      if (t.dataset.hw) return prepareAssignment(t.dataset.hw);
-      if (t.dataset.hwopen) { const x = await api.assignment_open(t.dataset.hwopen); if (!x.ok) toast(x.error); return; }
       if (c === "etl-sync") return etlSync();
       if (c === "etl-connect") {
-        const token = await askText({ title: "eTL 연결", ok: "연결", secret: true, body: "eTL(myetl.snu.ac.kr) → 계정 → 설정 → '새 액세스 토큰'에서 용도에 Lecture Hub를 적고 만든 토큰을 붙여 넣으세요. 과제 목록을 읽기만 하고, 토큰은 이 PC의 Windows 자격 증명 관리자에만 저장됩니다." });
+        const token = await askText({ title: "eTL 연결", ok: "연결", secret: true, body: "eTL(myetl.snu.ac.kr, 다른 학교는 설정에서 고른 학교 Canvas) → 계정 → 설정 → '새 액세스 토큰'에서 용도에 Lecture Hub를 적고 만든 토큰을 붙여 넣으세요. 과제 목록을 읽기만 하고, 토큰은 이 PC의 Windows 자격 증명 관리자에만 저장됩니다." });
         if (token && token.trim()) return etlSync(token.trim());
         return;
       }
@@ -2316,277 +2655,6 @@
     load();
   }
 
-  /* 그스룸 함께 쓰는 사람: 이름 | 학번 연도 - 나머지 칸 (user 2026-11-14). rows: [[이름, 연도, 나머지], ...] */
-  const nameWidth = (s) => `${Math.max(3, [...String(s || "")].length) + 1.6}em`;  // a 3-letter name fits; longer names widen the box
-  const mateRow = (m, i) => `<div class="mate" data-i="${i}"><input class="ask m-name" data-f="0" style="width:${nameWidth(m[0])}" value="${esc(m[0])}" placeholder="이름" maxlength="20" autocomplete="off" aria-label="이름"><input class="ask m-y" data-f="1" value="${esc(m[1])}" placeholder="2020" inputmode="numeric" autocomplete="off" aria-label="학번 앞 4자리(입학 연도)"><span class="m-dash">-</span><input class="ask m-n" data-f="2" value="${esc(m[2])}" placeholder="12345" maxlength="8" inputmode="numeric" autocomplete="off" aria-label="학번 뒤 자리"><button class="ibtn m-del" data-mdel="${i}" title="이 줄 지우기" aria-label="이 줄 지우기">✕</button></div>`;
-  const matesHtml = (rows) => `<div class="mates">${rows.map(mateRow).join("")}</div><button class="ghost m-add" data-madd="1">+ 사람 추가</button>`;
-  const matesText = (rows) => rows.filter((m) => m[0].trim() || m[1] || m[2]).map((m) => `${m[0].trim().replace(/\s+/g, " ") || "?"} ${m[1]}${m[2]}`).join("\n");
-  const matesFrom = (pairs) => { const out = (pairs || []).map(([n, no]) => [String(n), String(no).slice(0, 4), String(no).slice(4)]); while (out.length < 3) out.push(["", "", ""]); return out; };
-  // typing in a row: keeps rows in step; 4 digits of the year (or a pasted 'YYYY-NNNNN') moves on to the second box
-  const matesInput = (e, rows) => {
-    const inp = e.target.closest(".mate input"); if (!inp) return false;
-    const i = +inp.closest(".mate").dataset.i, f = +inp.dataset.f, row = rows[i]; if (!row) return true;
-    let v = inp.value;
-    if (f) { v = v.replace(/\D/g, ""); if (v !== inp.value) inp.value = v; } else inp.style.width = nameWidth(v);
-    if (f === 1 && v.length > 4) { const rest = inp.parentNode.querySelector(".m-n"); row[2] = rest.value = v.slice(4, 12); v = inp.value = v.slice(0, 4); rest.focus(); }
-    else if (f === 1 && v.length === 4 && e.inputType !== "deleteContentBackward") inp.parentNode.querySelector(".m-n").focus();
-    row[f] = v; return true;
-  };
-  const matesClick = (t, rows) => {
-    if (t.closest("[data-madd]")) { if (rows.length < 8) rows.push(["", "", ""]); return true; }
-    const del = t.closest("[data-mdel]"); if (!del) return false;
-    rows.splice(+del.dataset.mdel, 1); while (rows.length < 3) rows.push(["", "", ""]); return true;
-  };
-
-  /* ---------- 그룹스터디룸 예약 (P-019): Aside(기본, D-069) 또는 Claude in Chrome이 예약·반납하고, 앱은 결과만 보여 준다 ---------- */
-  function openRoom(only) {
-    document.querySelectorAll(".room-scrim").forEach((s) => s.remove());
-    const publicRooms = (ui.info.edition || {}).name === "public";
-    const prefs = !publicRooms && (ui.info.edition || {}).gsr_prefs !== false;  // full build: saved companions prefill the form
-    const rulesOnly = only === "rules" && !publicRooms;  // 사이드바 정기 예약 버튼: 규칙·다음 시도·정기 예약 기록만
-    const st = { data: null, day: null, start: "15:00", hours: 3, use: "과제", room: "", mates: matesFrom([]), me: [["", "", ""]], saved: [], rules: [], auto: true, dirty: false, lastJob: null, alts: null, notice: null, chat: [], thinking: false };
-    const scrim = document.createElement("div");
-    scrim.className = "scrim cal-scrim room-scrim";
-    scrim.innerHTML = rulesOnly
-      ? `<div class="cal-panel room-panel room-rules"><div class="cal-head"><b>그스룸 정기 예약</b><small class="room-sub">매주 같은 요일·시각에 자동 예약 (30분~12시간)</small><span class="grow"></span><button class="ghost" data-c="full">그스룸 창</button><button class="ibtn" data-c="close" title="닫기">✕</button></div><div class="room-job" id="roomJob" hidden></div><div class="room-main room-rules-body" id="roomMain"></div></div>`
-      : `<div class="cal-panel room-panel"><div class="cal-head"><b>그룹스터디룸 예약</b><small class="room-sub">관정관 4층 6인실 · ${publicRooms ? "최대 3시간 · 예약마다 확인" : "30분~12시간(3시간을 넘으면 이어서)"} · 신청인+동반 3명</small><span class="grow"></span>${publicRooms ? "" : `<button class="ghost" data-c="rules">정기 예약</button>`}<button class="ghost" data-c="refresh">예약 목록 확인</button><button class="ibtn" data-c="close" title="닫기">✕</button></div><div class="room-job" id="roomJob" hidden></div>${publicRooms ? "" : `<div class="room-chat"><div class="room-chat-log" id="roomChatLog" hidden></div><div class="room-chat-in"><input id="rChat" autocomplete="off" maxlength="300" placeholder="말로 지시하세요 — 내일 2시부터 6시간 예약 · 수요일 거 취소"><button class="primary" data-c="chat" id="rChatGo">보내기</button></div></div>`}<div class="cal-body"><div class="room-main" id="roomMain"></div><div class="cal-side" id="roomSide"></div></div></div>`;
-    document.body.appendChild(scrim); keepFocus(scrim);
-    const main = scrim.querySelector("#roomMain"), side = scrim.querySelector("#roomSide"), banner = scrim.querySelector("#roomJob");
-    let timer = null;
-    const close = () => { clearTimeout(timer); scrim.remove(); document.removeEventListener("keydown", key); };
-    const key = (e) => { if (e.key === "Escape" && isTop(scrim)) close(); };
-    document.addEventListener("keydown", key);
-    if (prefs && !rulesOnly) api.gsr_companions_get().then((r) => {
-      if (!r.ok || !r.rows.length) return;
-      st.saved = r.rows;
-      if (r.applicant && !matesText(st.me)) st.me = [[r.applicant[0], String(r.applicant[1]).slice(0, 4), String(r.applicant[1]).slice(4)]];
-      if (!matesText(st.mates)) { st.mates = matesFrom(r.rows); if (st.data && main.querySelector(".room-mates")) draw(); }
-    });
-    const hm = (t) => (t && t.length === 4 ? `${t.slice(0, 2)}:${t.slice(2)}` : t || "");
-    const viaAside = () => ((st.data || {}).browser || "aside") === "aside";
-    const browserName = () => (viaAside() ? "Aside" : "Chrome");
-    const plus3h = (t, h = 3) => { const m = +t.slice(0, 2) * 60 + +t.slice(3, 5) + h * 60; return `${String(Math.floor(m / 60)).padStart(2, "0")}:${String(m % 60).padStart(2, "0")}`; };
-    const dayLabel = (iso) => { const d = (st.data.days || []).find((x) => x.date === iso); return d ? d.label : mdText(iso); };
-    const stamp = (iso) => { const d = new Date(iso); return isNaN(d) ? "" : `${d.getMonth() + 1}/${d.getDate()} ${String(d.getHours()).padStart(2, "0")}:${String(d.getMinutes()).padStart(2, "0")}`; };
-    const hText = (h) => { const m = Math.round(h * 60); return m % 60 === 0 ? `${m / 60}시간` : m < 60 ? `${m}분` : `${Math.floor(m / 60)}시간 ${m % 60}분`; };
-    const KIND = { book: "예약", return: "반납", cancel: "예약 취소", list: "확인", chat: "말로 지시" };
-    const BY = { app: "앱", "app-auto": "앱 자동반납", task: "예약 작업" };
-    const WD = "월화수목금토일", wd = (d) => WD[(d.getDay() + 6) % 7];
-    const md = (d) => `${d.getMonth() + 1}/${d.getDate()}(${wd(d)})`;
-    // 정기 예약은 앱 밖의 예약 작업(스케줄러)이 하루 두 번 '오늘+3일'을 보고 건다. TRY = 그 작업의 실행 시각(작업 설정과 맞춘다)
-    const TRY = [[0, 5], [9, 5]];
-    const tryText = (h, m) => `${String(h).padStart(2, "0")}:${String(m).padStart(2, "0")}`;
-    const nextTry = (rule) => {
-      const now = new Date();
-      for (let k = 0; k < 15; k++) {
-        const day = new Date(now.getFullYear(), now.getMonth(), now.getDate() + k);
-        if (wd(day) !== rule.weekday) continue;
-        for (const [h, m] of TRY) {
-          const at = new Date(day.getFullYear(), day.getMonth(), day.getDate() - 3, h, m);
-          if (at > now) return { day, at };
-        }
-      }
-      return null;
-    };
-    const chatLog = scrim.querySelector("#roomChatLog"), chatIn = scrim.querySelector("#rChat");
-    const drawChat = () => {
-      if (!chatLog) return;
-      chatLog.hidden = !st.chat.length;
-      chatLog.innerHTML = st.chat.slice(-5).map((m, i, all) => `<div class="rc ${m.who}">${esc(m.text)}${m.confirm && i === all.length - 1 ? `<span class="rc-acts"><button class="primary" data-chat-do="1"${st.thinking ? " disabled" : ""}>${m.confirm.intent === "book" ? "예약 확인" : m.confirm.intent === "cancel" ? "예약 취소" : "반납"}</button><button class="ghost" data-chat-no="1">그만두기</button></span>` : ""}</div>`).join("");
-      chatLog.scrollTop = chatLog.scrollHeight;
-    };
-    const sendChat = async () => {
-      if (!chatIn) return;  // public edition: manual booking only (user 2026-11-14)
-      const text = (chatIn.value || "").trim();
-      if (!text || st.thinking) return;
-      chatIn.value = ""; st.thinking = true;
-      st.chat.push({ who: "me", text }, { who: "bot", text: "해석하는 중… (몇 초)" }); drawChat();
-      const r = await api.room_chat(text);
-      st.thinking = false; st.chat.pop();
-      if (!r.ok) st.chat.push({ who: "bot", text: r.error || "해석하지 못했습니다" });
-      else st.chat.push({ who: "bot", text: r.say || "", confirm: r.confirm || null });
-      drawChat();
-      if (r.ok && r.started) { st.notice = null; st.lastJob = "running"; load(); }
-    };
-    const load = async () => {
-      clearTimeout(timer);
-      const r = await api.room();
-      st.data = r;
-      if (r.ok) {
-        if (!r.days.some((d) => d.date === st.day)) st.day = (r.days[1] || r.days[0]).date;
-        if (!r.starts.includes(st.start)) st.start = r.starts[0];
-        if (!st.dirty) { st.rules = r.rules.map((x) => ({ ...x })); st.auto = r.auto_return; }
-        const job = r.job || {};
-        if (st.lastJob === "running" && job.state !== "running") finished(job);
-        st.lastJob = job.state;
-        if (job.state === "running") timer = setTimeout(load, 2000);
-      }
-      draw();
-    };
-    const finished = (job) => {
-      const res = job.result || {};
-      let text;
-      if (job.state === "stopped") {
-        const what = { book: "예약", cancel: "취소", return: "반납" }[job.action];
-        text = `중지했습니다.${what ? ` 사이트에 ${what} 요청이 이미 나갔다면 처리됐을 수 있으니 [예약 목록 확인]으로 확인하세요.` : ""} ${browserName()}에 예약 탭이 남아 있으면 닫아 주세요.`;
-        st.notice = { tone: "stop", text }; return;
-      }
-      if (res.login_required) text = `SNU 로그인이 풀려 있고 자동 로그인도 되지 않았습니다. ${browserName()}에서 로그인한 뒤 다시 누르세요.`;
-      else if (job.action === "book") text = res.ok ? `${res.room}${String(res.room).split("·").every((n) => (st.data.monitor_rooms || []).includes(n)) ? "(모니터 있음)" : " (모니터 없는 방)"} 예약했습니다 — ${dayLabel(`${res.date.slice(0, 4)}-${res.date.slice(4, 6)}-${res.date.slice(6)}`)} ${hm(res.start)}~${hm(res.end)}${res.shortened ? ` (${hText((res.requested || 180) / 60)} 빈 방이 없어 ${hText(res.minutes / 60)}만 잡음)` : ""}` : `예약하지 못했습니다: ${res.why || res.error || "이유 미상"}${res.partial ? ` — 앞 ${res.blocks.length}블록(${res.blocks.map((b) => `${b[0]} ${hm(b[1])}~${hm(b[2])}`).join(", ")})은 예약됨` : ""}`;
-      else if (job.action === "cancel") text = res.ok ? `${(res.cancelled || []).map((c) => `${c[0]} ${c[1].slice(11)}~${c[2]}`).join(", ")} 예약을 취소했습니다` : `취소하지 않았습니다: ${res.why || res.error || "이유 미상"}${(res.cancelled || []).length ? ` — 앞 ${res.cancelled.length}건(${res.cancelled.map((c) => `${c[0]} ${c[1].slice(11)}~${c[2]}`).join(", ")})은 취소됨` : ""}`;
-      else if (job.action === "return") text = res.ok ? `${res.room || ""} 반납했습니다` : `반납하지 않았습니다: ${res.why || res.error || "이유 미상"}`;
-      else text = res.ok ? "예약 목록을 새로 받았습니다" : `확인하지 못했습니다: ${res.error || "이유 미상"}`;
-      st.notice = { tone: res.ok ? "ok" : "bad", text };
-      if (job.action === "book") st.alts = res.ok && !res.shortened ? null : res.alternatives || null;
-    };
-    const row = (b, dis) => `<div class="room-bk${b.active ? "" : " past"}"><i class="dot ${b.tone === "done" ? "" : b.tone}"></i><div class="grow"><b>${esc(b.seat)}</b>${b.monitor ? ` <span class="tag">모니터</span>` : ""} ${esc(b.when)}<small>${esc(b.status_name)}${b.auto_at ? " · " + esc(b.auto_at) : ""}</small></div>` +
-      (b.can_return ? `<button class="ghost" data-ret="${esc(b.id)}" data-seat="${esc(b.seat)}"${dis}>반납</button>` : "") +
-      (b.chain ? `<button class="ghost" data-cancel="${esc(b.chain.ids.join(","))}" data-seat="${esc(b.chain.seat)}" data-when="${esc(b.chain.when)}" data-n="${b.chain.ids.length}"${dis}>이어진 ${b.chain.ids.length}건 취소</button>` : "") +
-      (b.can_cancel ? `<button class="ghost" data-cancel="${esc(b.id)}" data-seat="${esc(b.seat)}" data-when="${esc(b.when)}" data-n="1"${dis}>${b.chain ? "이 블록만 취소" : "예약 취소"}</button>` : "") + `</div>`;
-    const draw = () => {
-      const r = st.data;
-      if (!r || !r.ok) { main.innerHTML = `<div class="hint">그스룸을 열 수 없습니다: ${esc(r && r.error)}</div>`; if (side) side.innerHTML = ""; return; }
-      const job = r.job || {}, running = job.state === "running", dis = running ? " disabled" : "";
-      if (running) {
-        banner.hidden = false; banner.className = "room-job run";
-        banner.innerHTML = `<i class="dot rec"></i><span class="grow">${job.stopping ? "중지하는 중…" : (viaAside() ? `Aside에서 ‘${esc(job.label)}’ 하는 중… 몇 초면 끝납니다.` : `Claude가 Chrome에서 ‘${esc(job.label)}’ 하는 중… 1분쯤 걸립니다.`) + " 이 창을 닫아도 계속됩니다."}</span><button class="ghost" data-c="stop"${job.stopping ? " disabled" : ""} title="작업을 멈춥니다. 사이트에 요청이 이미 나갔다면 되돌려지지 않습니다">중지</button>`;
-      }
-      else if (st.notice) { banner.hidden = false; banner.className = "room-job " + st.notice.tone; banner.textContent = st.notice.text; }
-      else banner.hidden = true;
-      scrim.querySelectorAll('[data-c="refresh"]').forEach((b) => { b.disabled = running; });
-      const opt = (list, cur) => list.map((v) => `<option${v === cur ? " selected" : ""}>${esc(v)}</option>`).join("");
-      const hopt = (cur) => (r.hours || [3]).map((h) => `<option value="${h}"${h === (+cur || 3) ? " selected" : ""}>${hText(h)}</option>`).join("");
-      const logRow = (e) => `<div class="room-log${e.ok || e.skipped || e.stopped ? "" : " bad"}"><span class="t">${esc(stamp(e.ts))}</span>${esc(KIND[e.kind] || e.kind)}${e.room ? " " + esc(e.room) : ""}${e.ok ? " ✓" : ""}${e.detail ? " — " + esc(e.detail) : ""}<small>${esc(BY[e.by] || e.by || "")}</small></div>`;
-      const ruleRows = (wide) => st.rules.map((x, i) => `<div class="room-rule"><input type="checkbox" title="켜기/끄기" data-ri="${i}" data-rk="enabled"${x.enabled ? " checked" : ""}>` +
-        `<select data-ri="${i}" data-rk="weekday">${opt(r.weekdays, x.weekday)}</select><select data-ri="${i}" data-rk="start">${opt(r.starts, x.start)}</select>` +
-        `<select data-ri="${i}" data-rk="hours" title="길이">${hopt(x.hours)}</select>` + (wide ? `<span class="room-end">~ ${plus3h(x.start, x.hours || 3)}</span>` : "") +
-        `<select data-ri="${i}" data-rk="use">${opt(r.uses, x.use)}</select><button class="ibtn" data-rdel="${i}" title="규칙 지우기">✕</button></div>`).join("") || `<div class="hint">규칙이 없습니다. [+ 규칙]으로 추가하세요.</div>`;
-      const ruleActs = `<div class="acts"><button class="ghost" data-c="radd">+ 규칙</button><span class="grow"></span>${st.dirty ? `<span class="hint">저장하지 않은 변경</span>` : ""}<button class="primary" data-c="rsave"${st.dirty ? "" : " disabled"}>저장</button></div>`;
-      if (rulesOnly) {
-        const plan = (st.dirty ? r.rules : st.rules).map((x) => {
-          if (!x.enabled) return `<div class="room-next off"><b>${esc(x.weekday)} ${esc(x.start)}~${plus3h(x.start, x.hours || 3)}</b><small>꺼짐</small></div>`;
-          const n = nextTry(x);
-          return n ? `<div class="room-next"><b>${md(n.day)} ${esc(x.start)}~${plus3h(x.start, x.hours || 3)}</b> ${esc(x.use)}<small>${md(n.at)} ${tryText(n.at.getHours(), n.at.getMinutes())}에 예약 시도${TRY.length > 1 ? ` (실패하면 그날 ${tryText(...TRY[TRY.length - 1])}에 한 번 더)` : ""}</small></div>` : "";
-        }).join("") || `<div class="hint">켜진 규칙이 없습니다.</div>`;
-        const books = r.log.filter((e) => e.kind === "book");
-        main.innerHTML = `<div class="sl">규칙</div>${ruleRows(true)}${ruleActs}
-          <div class="sl">다음 예약 시도${st.dirty ? " <small>(저장된 규칙 기준)</small>" : ""}</div>${plan}
-          <div class="hint">따로 설정한 예약 작업이 매일 ${TRY.map((t) => tryText(...t)).join("·")}에 3일 뒤 날짜를 봅니다. 작업을 돌리는 프로그램이 켜져 있어야 하고, 그날 이미 예약이 있으면 건너뜁니다. 3시간을 넘으면 3시간 블록을 이어서 잡고, 블록마다 끝나기 5분 전 자동반납을 걸어 둡니다.</div>
-          <div class="sl">예약 기록</div>${books.map(logRow).join("") || `<div class="hint">아직 예약 기록이 없습니다.</div>`}`;
-        return;
-      }
-      const days = r.days.map((d) => `<button class="chipbtn${d.date === st.day ? " on" : ""}" data-day="${d.date}">${esc(d.label)}</button>`).join("");
-      const sug = r.suggest.length ? r.suggest.map((s) => `<button class="chipbtn sug" data-sday="${s.date}" data-sstart="${s.start}" title="시간표 공강 ${esc(s.gap)}">${esc(dayLabel(s.date))} ${s.start}~${s.end}</button>`).join("")
-        : `<span class="hint">예약 가능한 날에 3시간 공강이 없거나, 그날 이미 예약이 있습니다.</span>`;
-      const alts = st.alts && st.alts.length ? `<div class="sl">${r.public ? st.hours : 3}시간 가능한 다른 시각 — 누르면 예약 확인</div><div class="chips">${st.alts.map((a) => `<button class="chipbtn" data-alt-room="${esc(a.room)}" data-alt-start="${hm(a.start)}"${dis}>${esc(a.room)} · ${hm(a.start)}~${hm(a.end)}</button>`).join("")}</div>` : "";
-      const seen = r.updated_at ? `마지막 확인 ${stamp(r.updated_at)}${r.updated_by ? " · " + (BY[r.updated_by] || r.updated_by) : ""}` : "아직 확인 안 함 — 위 [예약 목록 확인]";
-      main.innerHTML = `<div class="sl">날짜 (3일 뒤까지)</div><div class="chips">${days}</div>
-        <div class="room-form">${r.public ? `<label>방<input id="rRoom" value="${esc(st.room)}" maxlength="4" placeholder="방 번호" style="width:76px"></label>` : ""}<label>시작<select id="rStart">${opt(r.starts, st.start)}</select></label><label>길이<select id="rHours">${hopt(st.hours)}</select></label><span class="room-end">~ ${plus3h(st.start, st.hours)}</span><label>용도<select id="rUse">${opt(r.uses, st.use)}</select></label><button class="primary" data-c="book"${dis}>${hText(st.hours)} 예약</button></div>
-        <div class="room-mates room-me"><div class="sl">신청인 (나) <small>로그인할 계정의 이름과 학번 · 사이트에서 같은 사람인지 확인합니다</small></div><div class="mates" data-me="1">${mateRow(st.me[0], 0).replace(/<button class="ibtn m-del"[^]*?<\/button>/, "")}</div></div>
-        <div class="room-mates"><div class="sl">함께 쓰는 사람 <small>나를 빼고 3명 이상 · 학번은 앞 4자리와 뒷자리를 나눠 적습니다 · ${prefs ? "설정에 저장한 사람이 미리 채워집니다. 여기서 바꾸면 이번 예약에만 씁니다" : "이번 예약에만 쓰고 저장하지 않습니다"}</small></div>${matesHtml(st.mates)}</div>
-        <div class="sl">시간표 공강 추천 — 누르면 위에 채워짐</div><div class="chips">${sug}</div>${alts}
-        <div class="sl">내 예약 <small>${esc(seen)}</small></div>${r.active.map((b) => row(b, dis)).join("") || `<div class="hint">다가오는 예약이 없습니다.</div>`}
-        ${r.past.length ? `<div class="sl">지난 예약</div>${r.past.map((b) => row(b, dis)).join("")}` : ""}`;
-      const log = r.log.map(logRow).join("") || `<div class="hint">기록이 없습니다.</div>`;
-      side.innerHTML = `${r.public ? `<div class="sl">예약 규칙</div><div class="hint">자동·정기 예약과 3시간 초과 체인은 사용하지 않습니다. 방과 시각을 예약마다 확인합니다.</div><button class="ghost" data-c="rsave">반납 설정 저장</button>` : `<div class="sl">정기 예약</div><div class="hint">설정한 정기 예약 규칙입니다.</div>${ruleRows(false)}${ruleActs}`}
-        <label class="room-auto"><input type="checkbox" id="rAuto"${st.auto ? " checked" : ""}>앱이 켜져 있으면 끝나기 ${r.auto_lead_min}분 전에 자동반납 (사용중일 때만)</label>
-        <div class="sl">최근 기록</div>${log}
-        <div class="src">${viaAside() ? "예약·반납은 Aside 브라우저가 합니다(AI 없이 정해진 순서대로, 로그인은 Aside 비밀번호 관리자가 채움)" : "예약·반납은 Claude가 사용자 Chrome(저장된 SNU 로그인)에서 합니다"}. 앱은 비밀번호를 다루지 않습니다.</div>`;
-    };
-    const start = async (call, booking = false) => {
-      const r = await call;
-      if (!r.ok) { toast(r.error || "시작하지 못했습니다"); return; }
-      if (booking) st.mates = matesFrom(st.saved);  // typed for each booking (full build: back to the saved list)
-      st.notice = null; st.lastJob = "running"; load();
-    };
-    scrim.addEventListener("input", (e) => { matesInput(e, e.target.closest("[data-me]") ? st.me : st.mates); });
-    // 4 people in all: me + at least 3 companions, every row with a name and a full student number (user 2026-11-14)
-    const peopleError = () => {
-      const full = (m) => m[0].trim() && m[1].length === 4 && m[2].length >= 2;
-      const me = st.me[0];
-      if (!full(me)) return "신청인(나)의 이름과 학번을 적어 주세요";
-      const typed = st.mates.filter((m) => m[0].trim() || m[1] || m[2]);
-      if (typed.some((m) => !full(m))) return "함께 쓰는 사람 중 이름이나 학번이 빈 줄이 있습니다";
-      const n = typed.filter((m) => `${m[1]}${m[2]}` !== `${me[1]}${me[2]}`).length;
-      if (n < 3) return `그룹스터디룸은 4명부터 예약됩니다 — 나 말고 ${3 - n}명을 더 적어 주세요 (지금 ${n + 1}명)`;
-      return "";
-    };
-    scrim.addEventListener("keydown", (e) => { if (e.target.id === "rChat" && e.key === "Enter" && !e.isComposing) { e.preventDefault(); sendChat(); } });
-    scrim.addEventListener("change", (e) => {
-      const t = e.target;
-      if (t.id === "rRoom") { st.room = t.value.trim().toUpperCase(); return; }
-      if (t.id === "rStart") { st.start = t.value; draw(); return; }
-      if (t.id === "rHours") { st.hours = +t.value; draw(); return; }
-      if (t.id === "rUse") { st.use = t.value; return; }
-      if (t.id === "rAuto") { st.auto = t.checked; st.dirty = true; draw(); return; }
-      if (t.dataset.ri !== undefined) { st.rules[+t.dataset.ri][t.dataset.rk] = t.type === "checkbox" ? t.checked : t.dataset.rk === "hours" ? +t.value : t.value; st.dirty = true; draw(); }
-    });
-    scrim.addEventListener("click", async (e) => {
-      if (e.target === scrim) { close(); return; }
-      if (matesClick(e.target, st.mates)) return draw();
-      const t = e.target.closest("[data-c],[data-day],[data-sday],[data-alt-room],[data-ret],[data-cancel],[data-rdel],[data-chat-do],[data-chat-no]"); if (!t || t.disabled) return;
-      const c = t.dataset.c;
-      if (c === "close") return close();
-      if (c === "rules" || c === "full") {
-        if (st.dirty && !(await dialog({ title: "저장하지 않은 규칙", body: "바꾼 규칙을 저장하지 않고 옮길까요?", ok: "옮기기" }))) return;
-        close(); return openRoom(c === "rules" ? "rules" : undefined);
-      }
-      if (c === "refresh") return start(api.room_refresh());
-      if (c === "chat") return sendChat();
-      if (c === "stop") {
-        const r = await api.room_stop();
-        if (!r.ok) toast(r.error || "중지하지 못했습니다");
-        return load();
-      }
-      if (c === "book") {
-        const bad = peopleError(); if (bad) { toast(bad); return; }
-        return start(api.room_book(st.day, st.start, st.use, publicRooms ? st.room : null, st.hours, matesText(st.mates), matesText(st.me)), true);
-      }
-      if (c === "radd") { st.rules.push({ weekday: "월", start: "15:00", use: "과제", hours: 3, enabled: true }); st.dirty = true; return draw(); }
-      if (c === "rsave") {
-        const r = await api.room_rules(st.rules, st.auto);
-        if (!r.ok) { toast(r.error || "저장하지 못했습니다"); return; }
-        st.dirty = false; toast("저장했습니다"); return load();
-      }
-      if (t.dataset.day) { st.day = t.dataset.day; st.alts = null; return draw(); }
-      if (t.dataset.sday) { st.day = t.dataset.sday; st.start = t.dataset.sstart; st.alts = null; return draw(); }
-      if (t.dataset.altRoom) {
-        const bad = peopleError(); if (bad) { toast(bad); return; }
-        return start(api.room_book(st.day, t.dataset.altStart, st.use, t.dataset.altRoom, publicRooms ? st.hours : 3, matesText(st.mates), matesText(st.me)), true);
-      }
-      if (t.dataset.ret) {
-        const ok = await dialog({ title: `${t.dataset.seat} 반납`, body: "지금 반납하면 이 예약이 끝납니다. 방에서 나왔을 때만 누르세요.", ok: "반납", tone: "danger" });
-        if (ok) start(api.room_return(t.dataset.ret));
-        return;
-      }
-      if (t.dataset.chatNo) {
-        const m = st.chat[st.chat.length - 1];
-        if (m) m.confirm = null;
-        st.chat.push({ who: "bot", text: "그만뒀습니다." });
-        return drawChat();
-      }
-      if (t.dataset.chatDo) {
-        const m = st.chat[st.chat.length - 1];
-        if (!m || !m.confirm) return;
-        const go = m.confirm; m.confirm = null; drawChat();
-        const r = await api.room_chat_confirm(go.intent, go.ids, go.booking || null, go.intent === "book" ? matesText(st.mates) : "");
-        if (!r.ok) { if (go.intent === "book") m.confirm = go; st.chat.push({ who: "bot", text: r.error || "실행하지 못했습니다" }); return drawChat(); }
-        if (go.intent === "book") { st.mates = matesFrom(st.saved); draw(); }
-        st.chat.push({ who: "bot", text: go.intent === "book" ? "예약을 시작합니다." : go.intent === "cancel" ? "취소를 시작합니다. 1분쯤 걸립니다." : "반납을 시작합니다." }); drawChat();
-        st.notice = null; st.lastJob = "running"; return load();
-      }
-      if (t.dataset.cancel) {
-        const n = +t.dataset.n || 1;
-        const ok = await dialog({ title: n > 1 ? `이어진 ${n}건 예약 취소` : `${t.dataset.seat} 예약 취소`,
-          body: `${t.dataset.seat} ${t.dataset.when} 예약${n > 1 ? ` ${n}건을 모두` : "을"} 취소합니다. 취소하면 방이 다른 사람에게 열리고, 되돌리려면 새로 예약해야 하는데 그때는 빈 방이 없을 수 있습니다.`,
-          ok: "예약 취소", tone: "danger" });
-        if (ok) start(api.room_cancel(t.dataset.cancel.split(",")));
-        return;
-      }
-      if (t.dataset.rdel !== undefined) { st.rules.splice(+t.dataset.rdel, 1); st.dirty = true; draw(); }
-    });
-    load();
-  }
 
   function openSearch() {
     if (document.querySelector(".search-panel")) return;
@@ -2600,7 +2668,7 @@
     const draw = () => {
       box.innerHTML = results.length ? results.map((r, i) => {
         const where = r.lecture_id ? `${esc(r.course)} ${esc(r.label || "")} · ${r.date ? mdText(r.date) : ""}` : esc(r.course);
-        const at = r.start_ms !== null && r.start_ms !== undefined ? ` · ${clock(r.start_ms)}` : r.page ? ` · ${r.page}쪽` : "";
+        const at = r.start_ms !== null && r.start_ms !== undefined ? ` · ${clock(r.start_ms)}` : r.page ? (r.unit === "구간" ? ` · 구간 ${r.page}` : ` · ${r.page}쪽`) : "";
         const tag = r.kind === "material_title" ? "자료" : r.kind === "material" ? "자료 본문" : esc(r.engine || "전사");
         return `<div class="r${i === on ? " on" : ""}" data-i="${i}"><div class="h"><span>${where}${at}</span><span class="b">${tag}</span></div><div class="x">${snippet(r.text, input.value.trim())}</div></div>`;
       }).join("") : `<div class="hint">${input.value.trim().length < 2 ? "두 글자 이상 입력하세요." : "결과가 없습니다."}</div>`;
@@ -2735,6 +2803,12 @@
     cap.error = ""; cap.pendingAuto = true;  // live transcription starts once the recorder runs (followRecording)
     const r = await api.start(ui.course, m2.mode, ui.device, ui.courseSource, m2.withPc);
     if (!r.ok) { cap.pendingAuto = false; toast(r.reason || "시작하지 못했습니다"); return; }
+    // said, never a stop: the recording is already running and no dialog here is waited for. Each stays until it is
+    // closed (a toast is gone after 1.8 s, too short for these sentences)
+    for (const n of r.notices || []) {
+      if (n.kind === "mic_blocked") dialog({ title: "마이크 소리가 담기지 않을 수 있어요", body: n.text, ok: "Windows 설정 열기", cancel: "닫기" }).then((yes) => { if (yes) api.open_mic_settings(); });
+      else dialog({ title: n.kind === "disk_low" ? "디스크 공간이 얼마 남지 않았어요" : "알려 드립니다", body: n.text, ok: "확인", cancel: "" });
+    }
     if (ui.course) {  // the backend remembers it too (ui_prefs.json); keep this window's copy in step
       const P = ui.info.prefs || (ui.info.prefs = {});
       (P.source_by_course || (P.source_by_course = {}))[ui.course] = m2.withPc ? "both" : m2.mode === "loopback" ? "pc" : "mic";
@@ -2772,7 +2846,7 @@
       if (!consent) return;
     }
     const r = await api.transcription_start(consent, master || null, master ? course : null, token);
-    toast(r.ok ? "Google 전사를 시작했습니다" : r.reason || "시작하지 못했습니다");
+    toast(r.message || (r.ok ? "Google 전사를 시작했습니다" : r.reason || "시작하지 못했습니다"));
   }
   function onTranscribe() {
     const st = ui.state || {}, link = st.link || {};
@@ -2804,6 +2878,7 @@
 
   function bind() {
     document.querySelectorAll(".seg").forEach((seg) => seg.addEventListener("click", (e) => {
+      if (ui.view === "home" && seg.dataset.group === "r") return;
       const b = e.target.closest("button"); if (!b) return;
       seg.querySelectorAll("button").forEach((x) => x.classList.remove("on")); b.classList.add("on");
       seg.closest(".pane").querySelectorAll(":scope > .tab").forEach((t) => t.classList.toggle("on", t.id === b.dataset.t));
@@ -2824,25 +2899,32 @@
     $("examBtn").onclick = () => openNotes();
     $("importBtn").onclick = () => openImport();
     bindDrop();
-    $("homePrev").onclick = () => { const d = new Date(ui.home.year, ui.home.month - 2, 1); ui.home = { year: d.getFullYear(), month: d.getMonth() + 1 }; renderHome(); };
-    $("homeNext").onclick = () => { const d = new Date(ui.home.year, ui.home.month, 1); ui.home = { year: d.getFullYear(), month: d.getMonth() + 1 }; renderHome(); };
+    const homeMonth = (step) => { const H = ui.home, d = new Date(H.year, H.month - 1 + step, 1); ui.home = { year: d.getFullYear(), month: d.getMonth() + 1 }; renderHome(); };
+    $("homePrev").onclick = () => homeMonth(-1);
+    $("homeNext").onclick = () => homeMonth(1);
+    $("homeWeek").onclick = () => { ui.home = null; renderHome(); };
+    $("homeCandidates").onclick = () => openCalendar(ui.home.year, ui.home.month);
     $("homeAdd").onclick = () => openCalendar(ui.home.year, ui.home.month, { day: ui.info.today_iso });
+    $("todayCard").addEventListener("click", todayCardClick);
+    document.querySelectorAll(".home-month [data-home-mode]").forEach((b) => { b.onclick = () => setHomeMode(b.dataset.homeMode); });
+    $("liveBody").addEventListener("click", (e) => { if ($("c-live").classList.contains("day-view")) todayCardClick(e); });
     $("homeGrid").addEventListener("click", (e) => {
       const ev = e.target.closest("[data-ev]"), day = e.target.closest("[data-day]");
-      if (ev) openCalendar(ui.home.year, ui.home.month, { id: ev.dataset.ev });
-      else if (day) openCalendar(ui.home.year, ui.home.month, { day: day.dataset.day });
+      const [y, m] = day ? day.dataset.day.split("-").map(Number) : [ui.home.year, ui.home.month];  // the week view crosses months
+      if (ev) openCalendar(y, m, { id: ev.dataset.ev });
+      else if (day) openCalendar(y, m, { day: day.dataset.day });
     });
     $("todo").addEventListener("click", async (e) => {
-      const t = e.target.closest("[data-hw],[data-hwopen],[data-lecture],[data-course],[data-ev],[data-inbox],[data-cands]"); if (!t) return;
-      if (t.dataset.hw) return prepareAssignment(t.dataset.hw);
-      if (t.dataset.hwopen) { const x = await api.assignment_open(t.dataset.hwopen); if (!x.ok) toast(x.error); return; }
+      const t = e.target.closest("[data-lecture],[data-course],[data-ev],[data-inbox],[data-cands]"); if (!t) return;
       if (t.dataset.lecture) return openLecture(t.dataset.lecture);
       if (t.dataset.course) return openToday(t.dataset.course);
       if (t.dataset.inbox) return openInbox();
       if (t.dataset.cands) return openCalendar();
       if (t.dataset.ev) { const [y, m] = t.dataset.date.split("-").map(Number); openCalendar(y, m, { id: t.dataset.ev }); }
     });
-    $("miniBtn").onclick = async () => { await syncSelection(); api.show_mini(); };
+    $("todo").addEventListener("toggle", (e) => {  // "제출함 N건" stays open or closed across redraws
+      if (e.target.matches && e.target.matches("details[data-fold]")) settingsView.folds[e.target.dataset.fold] = e.target.open;
+    }, true);
     $("recBtn").onclick = onRec;
     $("engines").onclick = openEnginePop;
     $("lvEngines").addEventListener("click", (e) => { const b = e.target.closest("button[data-eng]"); if (b && !b.disabled) startEngine(b); });
@@ -2862,6 +2944,7 @@
       if (!r.ok) toast(r.reason || "시작하지 못했습니다");
     };
     $("htmlSel").onchange = () => showHtml(ui.htmlPages[+$("htmlSel").value]);
+    $("noteCodex").onclick = () => { if (ui.lecture) openCodex(ui.lecture.id); };
     $("noteRemake").onclick = async () => {
       if (!ui.lecture) return;
       const ok = await dialog({ title: "정리본을 다시 만들까요?", body: "전사를 다시 읽어 정리본을 새로 씁니다. 앱이 만든 정리본은 새 내용으로 바뀌고, 직접 고친 정리본 파일은 그대로 두고 새 파일로 만듭니다.", ok: "다시 만들기" });
@@ -2874,8 +2957,7 @@
     document.addEventListener("keydown", htmlKeys);
     $("htmlFrame").addEventListener("load", noteFrameLoaded);
     $("htmlOpen").onclick = async () => { const n = ui.htmlPages && ui.htmlPages[+$("htmlSel").value || 0]; if (n) { const r = await api.open_path(n.path); if (!r.ok) toast(r.error); } };
-    $("roomBtn").onclick = () => openRoom();
-    $("memBtn").onclick = () => { if (window.LHGerman) window.LHGerman.openFromRail($("memBtn"), toast, openExam); };  // 암기장 바로 열기(german.js)
+
     $("examChip").onclick = () => openExam();
     $("capBtn").onclick = () => onCaptions();
     $("sideViewBtn").onclick = () => sideView(true);
@@ -2925,7 +3007,7 @@
       menu($("overMore"), [{ items: [{ value: "snooze", text: "계속 녹음 — 10분 뒤 다시 묻기" }, { value: "mute", text: "계속 녹음 — 이번 수업은 묻지 않기" }] }],
         (v) => api.class_over_answer(v));
     };
-    $("starBtn").onclick = async () => { const r = await api.bookmark(); if (r.ok) toast("★ 중요 표시 · " + fmt(r.at_ms)); };
+    $("starBtn").onclick = async () => { const r = await api.bookmark(); if (r.ok) toast("중요 표시 · " + fmt(r.at_ms)); };
     $("courseBtn").onclick = (e) => {
       e.stopPropagation();
       const today = new Set(ui.info.today.map((s) => s.folder));
@@ -2961,6 +3043,7 @@
     $("health").addEventListener("click", (e) => {
       const a = e.target.closest("[data-act]"); if (!a) return;
       if (a.dataset.act === "probe") probe();
+      if (a.dataset.act === "mic-settings") api.open_mic_settings().then((r) => { if (!r.ok) toast(r.error); });
       if (a.dataset.act === "folder") api.open_folder(ui.state.summary.session_dir);
       if (a.dataset.act === "transcribe") onTranscribe();
       if (a.dataset.act === "open-linked") openLecture(ui.state.link.lecture_id);
@@ -2987,16 +3070,6 @@
       if (files) { openFiles(files.dataset.files); return; }
       const it = e.target.closest("[data-course]"); if (it) openToday(it.dataset.course);
     });
-    function openToday(folder) {
-      // A class of today that has not been recorded yet: the recorder ready, live transcription in the middle.
-      // The recording course follows only when nothing is recording (review S2-3: never switch mid-recording).
-      const st = ui.state || {};
-      if (!["starting", "recording", "stopping", "finalizing"].includes(st.phase)) {
-        ui.course = folder; ui.courseSource = "user_pick"; syncSelection();
-      }
-      ui.view = "live"; setHtmlSize("pane");
-      renderCenter(); renderAll();
-    }
     document.addEventListener("keydown", (e) => { if (e.ctrlKey && (e.key === "k" || e.key === "K")) { e.preventDefault(); openSearch(); } });
     $("lnext").onclick = () => {
       const st = ui.lecture && ui.lecture.state; if (!st) return;
@@ -3008,7 +3081,7 @@
         ui.maiShown = "running"; api.mai_prepare(rec.path); toast("MAI용 조각을 만드는 중…");
       }
     };
-    $("lvHead").addEventListener("click", (e) => { const bm = e.target.closest(".bm[data-seek]"); if (bm) { jumpTo(+bm.dataset.seek, true); return; } if (e.target.id === "switchUse") chooseTranscript(e); if (e.target.id === "cmpTr") compareTranscripts(); if (e.target.id === "saveTr") { e.stopPropagation(); saveTranscript(e.target); } const r = e.target.closest("[data-range]"); if (r) rangeAction(r); });
+    $("lvHead").addEventListener("click", (e) => { const bm = e.target.closest(".bm[data-seek]"); if (bm) { jumpTo(+bm.dataset.seek, true); return; } if (e.target.id === "switchUse") chooseTranscript(e); if (e.target.id === "saveTr") { e.stopPropagation(); saveTranscript(e.target); } const r = e.target.closest("[data-range]"); if (r) rangeAction(r); });
     $("lvList").addEventListener("click", (e) => {
       const t = e.target.closest("[data-seek]"); if (t) { jumpTo(+t.dataset.seek, true); return; }
       if (e.target.closest("[data-act='transcribe-lecture']")) transcribeLecture();
@@ -3059,7 +3132,7 @@
     $("srcBtn").title = `녹음할 소리: ${name}${ui.mic ? " · " + (ui.device || "기본 마이크") : ""} — 누르면 바꿉니다`;
     $("recBtn").title = ui.mic && ui.pc ? "마이크와 PC 소리를 따로 두 파일로 녹음" : ui.mic ? "마이크 녹음" : ui.pc ? "PC 소리만 녹음" : "마이크나 PC 소리를 켜 주세요";
   }
-  function renderAll() { renderTop(); renderSide(); renderMic(); sett($("courseName"), ui.course || "과목 없음"); renderDock(); renderTranscript(); }
+  function renderAll() { renderTop(); renderSide(); renderMic(); sett($("courseName"), ui.course || "과목 없음"); renderDock(); renderTranscript(); renderLive(); }
 
   /* State poll: every 250 ms while recording (timer, levels) and for 5 s after the user clicks or types; once a second
      (1.5 s) otherwise, 2 s after 30 s without input, every 5 s while the window is hidden (was 250 ms always: ~240 calls a minute on an idle window).
@@ -3102,12 +3175,23 @@
         if (!first) {
           await loadSidebar();
           if (ui.view === "lecture" && ui.lecture) openLecture(ui.lecture.id);
+          if (ui.calendarReload) ui.calendarReload();  // D-076: an AI app may have changed the calendar
+          else if (ui.view === "home") renderHome();
         }
+      }
+      if ((ui.state.timetable_version || 0) !== (ui.ttVersion || 0)) {  // D-083: an AI app changed the timetable
+        ui.ttVersion = ui.state.timetable_version || 0;
+        Object.assign(ui.info, await api.init()); renderAll(); refreshCourse();
       }
       if (ui.state.phase !== ui.lastPhase) {
         const was = ui.lastPhase; ui.lastPhase = ui.state.phase;
         // a recording started here or from the mini window: live transcription follows (not a re-attached one)
         if (was && !POLL_ACTIVE.includes(was) && ["starting", "recording"].includes(ui.state.phase) && !ui.state.attached) cap.pendingAuto = true;
+        // started from a class reminder or the mini window while the calendar is open: go to the recording screen, as
+        // the record button does. The calendar's narrow column is too small for the live panel (user, 2026-11-26).
+        if (was && !POLL_ACTIVE.includes(was) && ["starting", "recording"].includes(ui.state.phase) && ui.view === "home") {
+          ui.view = "live"; setHtmlSize("pane"); renderCenter();
+        }
         if (was && ["recording", "stopping", "finalizing"].includes(was) && ["done", "idle", "error"].includes(ui.state.phase)
             && ui.courseSource === "user_pick") {
           const r = await api.suggest_course();  // e.g. "AI 외부 강의" picked last night must not label today's class
@@ -3134,13 +3218,13 @@
   const FEATURE_BADGE = { ready: ["on", "사용 가능"], fallback: ["mid", "대체 방법으로"], missing: ["off", "연결 필요"] };
 
   /* optional features: hidden until switched on in settings; greyed (with the reason) while the program they need is missing */
-  const ed = (k) => !(ui.info && ui.info.edition && ui.info.edition[k] === false);  // public edition: no assignment / mai / qa
+  const ed = (k) => !(ui.info && ui.info.edition && ui.info.edition[k] === false);  // public edition: no mai / qa
 
   function applyLabs() {
     // the public edition has no 질의응답 and no 자막 buttons (user 2026-11-14); the owner's app keeps both
-    [["qaBtn", "qa"], ["capBtn", "captions"]].forEach(([id, k]) => { const el = $(id); if (el && !ed(k)) { el.hidden = true; el.style.display = "none"; } });
+    [["qaBtn", "qa"], ["capBtn", "captions"], ["maiHint", "mai"]].forEach(([id, k]) => { const el = $(id); if (el && !ed(k)) { el.hidden = true; el.style.display = "none"; } });
     const labs = (ui.info && ui.info.labs) || {}, feats = (ui.info && ui.info.features) || {};
-    const rules = [["roomBtn", "gsr", "gsr"], ["memBtn", "memorizer", null]];
+    const rules = [];  // the 암기장 button is gone (user 2026-11-25)
     rules.forEach(([id, lab, feat]) => {
       const el = $(id); if (!el) return;
       el.hidden = !labs[lab] || !ed(lab);
@@ -3173,6 +3257,25 @@
       `<div class="layout-row"><div class="layout-opts" role="radiogroup" aria-label="폴더 구성">${opts}</div><pre class="layout-tree" aria-label="폴더 미리 보기">${esc(tree)}</pre></div>` +
       (mode === "set" ? `<label class="dlg-check"><input type="checkbox" data-archive${L.archive_copies ? " checked" : ""}> 녹음 보관용 복사본도 과목별로 두기 (녹음본\\과목\\)</label>` : "");
   }
+  // settings: which app this is, where it keeps things, and the problem report file (nothing is sent by the app)
+  // settings › 기본 › 알림 · 업데이트: the once-a-day version check (only where the build can check)
+  function updateRow(u) {
+    return !u || !u.possible ? "" : `<label class="dlg-check"><input type="checkbox" data-update-check${u.on ? " checked" : ""}> 새 버전이 나오면 알려 주기 <small>(하루 한 번 버전 번호만 확인합니다. 보내는 정보는 없고, 설치는 직접 합니다.)</small></label>
+      ${u.available ? `<div class="ca gap"><b>새 버전 ${esc(u.latest)}이 있습니다.</b> <button data-a="update-open">내려받기 페이지 열기 ${ic("ext")}</button></div>` : ""}`;
+  }
+  function aboutSection(a, report) {
+    if (!a || !a.ok) return `<h5>앱 정보 · 문제 보고</h5><p class="err">${esc((a && a.error) || "앱 정보를 읽지 못했습니다")}</p>`;
+    const size = (n) => n == null ? "" : ` · ${n < 1024 ? n + " B" : Math.round(n / 1024) + " KB"}`;
+    const plan = report.plan ? `<div class="report-plan"><b>들어가는 것</b><ul>${report.plan.files.map((f) => `<li><code>${esc(f.name)}</code>${size(f.bytes)}<br><small>${esc(f.about)}</small></li>`).join("")}</ul>
+      <b>들어가지 않는 것</b><ul>${report.plan.excluded.map((x) => `<li>${esc(x)}</li>`).join("")}</ul></div>` : "";
+    return `<h5>앱 정보 · 문제 보고</h5>
+      <p>Lecture Hub ${esc(a.version)}${a.edition === "public" ? " (공개판)" : ""}${a.installed ? "" : " · 소스에서 실행 중"}. 앱을 지워도 학기 폴더, 설정, 기록은 이 PC에 남습니다.</p>
+      <div class="ca gap"><button data-a="about-open" data-id="semester"${a.folders.semester ? "" : " disabled"}>학기 폴더 열기</button><button data-a="about-open" data-id="settings">설정 폴더 열기</button><button data-a="about-open" data-id="logs">기록 폴더 열기</button>${a.notices.length ? `<button data-a="about-open" data-id="notices">라이선스·고지 보기</button>` : ""}</div>
+      <p>앱이 이상하게 동작하면 문제 보고 파일을 만들어 개발자에게 직접 보내 주세요. 앱이 자동으로 보내는 것은 없습니다.</p>
+      ${moreText("report-what", "만들기 전에 들어가는 것과 들어가지 않는 것을 먼저 보여 줍니다. 녹음, 전사, 노트, 키는 들어가지 않고, 경로 속의 사용자 이름과 과목·파일 이름은 가려집니다.")}
+      ${plan}<div class="ca gap"><button data-a="report">${report.plan ? "이대로 만들기" : "문제 보고 파일 만들기"}</button><span class="cmsg">${esc(report.msg)}</span></div>`;
+  }
+
   function cleanupRow(c) {
     if (!c || !c.ok) return `<p class="err">${esc((c && c.error) || "녹음 정리 설정을 읽지 못했습니다")}</p>`;
     return `<div class="cleanup-row"><label class="dlg-check"><input type="checkbox" data-cleanup${c.enabled ? " checked" : ""}> Google 전사가 끝나고</label>` +
@@ -3181,7 +3284,249 @@
       `<small>영구 삭제가 아니라 휴지통으로 옮깁니다. 휴지통 비우기는 직접 합니다. 앱을 켤 때 한 번 확인합니다.</small>`;
   }
 
-  async function openSettings() {
+  /* ---------- settings window (user 2026-11-25): a menu of groups, one group at a time ----------
+     Every section of the settings screen is in exactly one group. The group shown, each group's scroll position and
+     each fold's open state live here for this run of the app: a redraw (load() after most actions) and the next
+     opening come back to the same place. */
+  const SETTINGS_GROUPS = [
+    { id: "basic", label: "기본", icon: "sliders", sections: ["appearance", "timetable", "layout", "alerts"] },
+    { id: "record", label: "녹음·전사", icon: "mic", sections: ["permission", "cleanup", "live"] },
+    { id: "ai", label: "AI", icon: "spark", sections: ["ai_engine", "notices", "ailink"] },
+    { id: "connect", label: "연결", icon: "link", sections: ["keys", "tools", "features"] },
+    { id: "consent", label: "동의", icon: "shield", sections: ["consents"] },
+    { id: "extras", label: "선택 기능", icon: "star", sections: ["labs"] },
+    { id: "about", label: "앱 정보", icon: "info", sections: ["about"] },
+  ];
+  const settingsView = { group: "basic", scroll: {}, folds: {}, pick: {} };
+  // where the focus was, as a selector that finds the same control after a redraw (its first data-* attribute)
+  function focusKey(el) {
+    if (!el || !el.attributes || typeof CSS === "undefined" || !CSS.escape) return null;
+    const a = [...el.attributes].find((x) => x.name.startsWith("data-"));
+    if (!a) return null;
+    const id = el.getAttribute("data-id"), to = el.getAttribute("data-to");
+    return `${el.tagName.toLowerCase()}[${a.name}="${CSS.escape(a.value)}"]` + (id && a.name !== "data-id" ? `[data-id="${CSS.escape(id)}"]` : "") +
+      (to ? `[data-to="${CSS.escape(to)}"]` : "");
+  }
+
+  /* one fold pattern for whatever runs long: a <details> whose summary says what is inside (and how many); its open
+     state is kept per key across redraws. Never used for what a user must see before deciding (what a consent sends,
+     warnings, errors, courses that need a permission). */
+  function fold(key, summary, inner, { count = "", open = false, cls = "" } = {}) {
+    const isOpen = key in settingsView.folds ? settingsView.folds[key] : open;
+    return `<details class="fold${cls ? " " + cls : ""}" data-fold="${esc(key)}"${isOpen ? " open" : ""}><summary>${ic("right")}<span>${summary}</span>` +
+      `${count !== "" ? `<span class="fold-n">${esc(count)}</span>` : ""}</summary><div class="fold-body">${inner}</div></details>`;
+  }
+  // a list folds by itself when it is long (with its count); a short one stays open
+  function foldList(key, items, label, { limit = 8, wrap = "" } = {}) {
+    const body = wrap ? `<div class="${wrap}">${items.join("")}</div>` : items.join("");
+    return items.length <= limit ? body : fold(key, label, body, { count: `${items.length}개` });
+  }
+  // a long explanation: the first sentence stays, the rest behind "자세히" (text is already HTML)
+  function moreText(key, text, tag = "small") {
+    const cut = text.search(/\.\s/);
+    if (text.length < 90 || cut < 0 || cut > text.length - 20) return `<${tag}>${text}</${tag}>`;
+    return `<${tag} class="more-head">${text.slice(0, cut + 1)}</${tag}>` + fold(key, "자세히", `<${tag}>${text.slice(cut + 2)}</${tag}>`, { cls: "more" });
+  }
+
+  /* "all at once" for every list where courses are chosen one by one (D-074 and user 2026-11-25). A new per-course
+     list only adds a row here and calls pickAll(): "check" lists get [모두 선택]/[모두 해제] (one native dialog naming
+     every course, the consent still stored per course); "state" lists get "모든 과목을 [상태]로 [적용]". `rows(s)` reads
+     the screen state, so a folded list works the same. */
+  const PICK_ALL = {
+    mute: { kind: "mute", rows: (s) => (s.reminders && s.reminders.courses) || [] },
+    ailink: { kind: "check", provider: "ai_app_link", rows: (s) => (s.ailink && s.ailink.courses) || [],
+      allow: (names, token) => api.ai_link_allow_all(names, token) },
+    notices: { kind: "check", provider: "codex_notices", rows: (s) => (s.notices && s.notices.courses) || [],
+      allow: (names, token) => api.notices_allow_all(names, token) },
+    etlnotices: { kind: "check", provider: "codex_etl_notices", rows: (s) => (s.notices && s.notices.etl_courses) || [],
+      allow: (names, token) => api.etl_notices_allow_all(names, token) },
+    permission: { kind: "state", rows: (s) => (s.permissions && s.permissions.courses) || [], states: (s) => (s.permissions && s.permissions.states) || {},
+      confirm: ["allowed", "syllabus"] },  // the user says every lecturer allowed it: asked once in a native dialog
+  };
+  function pickAll(list, s, disabled = false) {
+    const P = PICK_ALL[list], off = disabled ? " disabled" : "";
+    if (P.kind === "check" || P.kind === "mute") return `<span class="pick-all"><button class="ghost" data-a="pick-all" data-id="${list}" data-to="on"${off}>모두 선택</button>` +
+      `<button class="ghost" data-a="pick-all" data-id="${list}" data-to="off"${off}>모두 해제</button></span>`;
+    const want = settingsView.pick[list] || "";
+    return `<span class="pick-all"><label>모든 과목을 <select data-pick-state="${list}"${off}><option value=""${want ? "" : " selected"}>상태 고르기</option>` +
+      Object.entries(P.states(s)).map(([k, v]) => `<option value="${esc(k)}"${want === k ? " selected" : ""}>${esc(v)}</option>`).join("") +
+      `</select></label><button class="ghost" data-a="pick-all" data-id="${list}" data-to="state"${off}>적용</button></span>`;
+  }
+  // what [모두 선택]/[모두 해제]/[적용] does; says what happened in a toast and returns true when the screen should reload
+  async function runPickAll(list, to, s) {
+    const P = PICK_ALL[list], rows = P.rows(s);
+    if (P.kind === "mute") {
+      const known = new Set(rows.map((r) => r.course));
+      const keep = (s.reminders.muted_courses || []).filter((c) => !known.has(c));
+      const muted = to === "on" ? [...keep, ...known] : keep;
+      const r = await api.reminders_set({ muted_courses: muted });
+      toast(r.ok ? (to === "on" ? "모든 과목의 알림을 껐습니다" : "모든 과목의 알림을 켰습니다") : r.error);
+      return !!r.ok;
+    }
+    if (P.kind === "state") {
+      const state = settingsView.pick[list] || "", label = P.states(s)[state];
+      if (!label) { toast("모든 과목에 줄 상태를 먼저 고르세요"); return false; }
+      const names = rows.filter((r) => r.state !== state).map((r) => r.course);
+      if (!names.length) { toast(rows.length ? `이미 모든 과목이 '${label}'입니다` : "시간표에 과목을 먼저 추가하세요"); return false; }
+      let token = null;
+      if (P.confirm.includes(state)) {
+        const q = await api.recording_permission_confirm_many(state, names);
+        if (!q.ok) { toast(q.error); return false; }
+        if (!q.yes) return false;
+        token = q.token;
+      }
+      const r = await api.recording_permission_all(state, names, token);
+      toast(r.ok ? `과목 ${names.length}개를 '${label}'(으)로 바꿨습니다` : r.error);
+      return true;
+    }
+    const on = to === "on", names = rows.filter((r) => !!r.allowed !== on).map((r) => r.course);
+    if (!names.length) { toast(on ? "이미 모든 과목을 골랐습니다" : "고른 과목이 없습니다"); return false; }
+    if (on) {
+      const q = await api.consent_confirm_many(P.provider, names);
+      if (!q.ok) { toast(q.error); return false; }
+      if (!q.yes) return false;
+      const r = await P.allow(names, q.token);
+      toast(r.ok ? `과목 ${names.length}개를 허용했습니다` : r.error);
+    } else {
+      const r = await api.consent_revoke_many(P.provider, names);
+      toast(r.ok ? `과목 ${r.revoked}개의 허용을 거뒀습니다 · 다음 요청부터 건네지 않습니다` : r.error);
+    }
+    return true;
+  }
+
+  /* Class notices (P-035, D-073): the switch, which AI reads (ChatGPT through the user's Codex login, or Google
+     Gemini; never one in place of the other), what goes out, and for Codex the courses allowed one by one (each
+     stored only through the native consent dialog). The words follow index/class_notices.py. */
+  function noticesSection(N) {
+    const engine = N.engine === "codex" ? "codex" : "google";
+    const used = `${Number(N.readings) || 0}회, 약 ${Math.round((Number(N.characters) || 0) / 1000)}천 자`;
+    const split = N.by_engine || {}, parts = [["codex", "ChatGPT"], ["google", "Google"]].filter(([k]) => split[k]).map(([k, v]) => `${v} ${Number(split[k]) || 0}`);
+    const text = engine === "codex"
+      ? `허용한 과목의 전사 글을 과목 이름·수업 날짜, 그 과목 시간표, 수업 7일 전부터의 그 과목 달력 일정 제목·시간표 변경과 함께 이 PC의 Codex로 보냅니다(로그인한 ChatGPT 계정, OpenAI). 과목 없는 일정과 소리는 보내지 않고, 녹음 중에는 보내지 않습니다. 전사가 바뀔 때 한 번 보내고, 실패하면 1시간·4시간 뒤 다시 보냅니다. 같은 전사는 3번까지만 보냅니다. 이번 달 보낸 횟수(실패 포함): ${used}${parts.length ? ` (${parts.join(" · ")})` : ""}.`
+      : `Google 전송에 동의한 과목의 전사 글을 과목 이름·수업 날짜, 그 과목 시간표, 수업 7일 전부터의 달력 일정 제목·시간표 변경(과목 없는 것 포함)과 함께 Gemini로 보냅니다. 전사가 바뀔 때 한 번 보내고, 실패하면 다시 보냅니다(서버가 오류로 답하면 곧바로 다른 모델로, 그 밖에는 1시간·4시간 뒤). 같은 전사는 3번까지만 보냅니다. 이번 달 보낸 횟수(실패 포함, Gemini 키 사용량에 들어감): ${used}.`;
+    const names = N.engines || { codex: "ChatGPT Edu (Codex)", google: "Google Gemini" };
+    const pick = `<label class="permission-row">읽는 AI<select data-notices-engine>${Object.entries(names).map(([k, v]) => `<option value="${esc(k)}"${engine === k ? " selected" : ""}>${esc(v)}</option>`).join("")}</select></label>` +
+      `<small>고른 곳으로만 보냅니다. 한 곳이 안 될 때 다른 회사로 바꿔 보내지 않습니다.</small>`;
+    let more = "";
+    if (engine === "codex") {
+      const state = N.unavailable ? `<p class="err">${esc(N.unavailable)}</p>`
+        : !N.codex_found ? `<p class="err">Codex(ChatGPT)가 이 PC에 없습니다. '연결 › 프로그램'의 설치 안내대로 설치하고 codex login으로 로그인하세요. 그때까지는 보내지 않습니다. <button class="ghost" data-a="group" data-id="connect">프로그램 보기</button></p>`
+        : N.recording_held ? `<small>녹음 중이라 쉬고 있습니다. 녹음이 끝나면 다음 순회(10분마다)에 이어서 합니다.</small>` : "";
+      const items = (N.courses || []).map((c) => `<label class="dlg-check"><input type="checkbox" data-notices-course="${esc(c.course)}"${c.allowed ? " checked" : ""}> ${esc(c.course)}</label>`);
+      const courses = items.length ? foldList("notices-courses", items, "하나씩 고르기", { wrap: "ailink-courses" }) : "<small>시간표에 과목을 먼저 추가하세요.</small>";
+      const needs = (N.needs_consent || []).length ? `<p class="err">허용이 필요한 과목: ${esc(N.needs_consent.join(", "))} · 새 전사가 있지만 허용하지 않아 보내지 않았습니다. 보내려면 아래에서 체크하세요.</p>` : "";
+      more = `${state}${needs}<div class="pick-head"><b>ChatGPT(Codex)로 보낼 과목</b>${items.length ? pickAll("notices", { notices: N }) : ""}</div>${courses}<small>체크할 때 무엇이 가는지 확인 창이 뜹니다. [모두 선택]은 과목 이름을 모두 적은 확인 창 하나로 묻습니다. 체크를 풀면 다음 순회부터 보내지 않습니다.</small>` + etlNoticesPart(N);
+    } else {
+      more = `<small>Google 전송 동의는 녹음을 Google로 전사할 때 과목마다 묻습니다.</small>`;
+    }
+    return `<h5>수업 중 공지 찾기</h5><label class="dlg-check"><input type="checkbox" data-notices${N.on ? " checked" : ""}> 전사 글에서 휴강·시험·과제 공지를 찾아 알려 주기</label>
+          <p><small>${text}</small></p>${pick}${more}`;
+  }
+
+  /* settings › 기본 › 알림: one switch per kind of eTL change (D-077), all on until turned off */
+  function etlNotifyRows(n) {
+    if (!n || !n.ok) return "";
+    const rows = Object.entries(n.labels || {}).map(([k, label]) => `<label class="dlg-check"><input type="checkbox" data-etl-notify="${esc(k)}"${(n.switches || {})[k] !== false ? " checked" : ""}> ${esc(label)} 알리기</label>`).join("");
+    return `<div class="etl-notify"><b>eTL 알림</b>${rows}<small>앱이 eTL 과제·자료 목록을 받을 때 바뀐 것을 Windows 알림과 위쪽 알림 줄로 알려 줍니다. AI를 쓰지 않고, 녹음 중에는 알리지 않다가 끝나면 알립니다. 제출한 파일이 0바이트이거나 허용되지 않은 형식이면 늘 알려 줍니다.</small></div>`;
+  }
+
+  /* eTL announcements → calendar candidates through Codex (D-077): its own consent per course, separate from the
+     transcript one above; the words follow index/etl_notices.py */
+  function etlNoticesPart(N) {
+    const rows = N.etl_courses || [];
+    const items = rows.map((c) => `<label class="dlg-check"><input type="checkbox" data-etlnotices-course="${esc(c.course)}"${c.allowed ? " checked" : ""}> ${esc(c.course)}</label>`);
+    const courses = items.length ? foldList("etl-notices-courses", items, "하나씩 고르기", { wrap: "ailink-courses" }) : "<small>시간표에 과목을 먼저 추가하세요.</small>";
+    const needs = (N.etl_needs_consent || []).length ? `<p class="err">eTL 공지 허용이 필요한 과목: ${esc(N.etl_needs_consent.join(", "))} · 새 공지가 있지만 허용하지 않아 보내지 않았습니다.</p>` : "";
+    return `${needs}<div class="pick-head"><b>eTL 공지도 ChatGPT(Codex)로 보낼 과목</b>${items.length ? pickAll("etlnotices", { notices: N }) : ""}</div>${courses}` +
+      `<small>앱이 받아 둔 eTL 공지(최근 4주)의 제목·본문·올린 날짜를 과목 이름, 오늘 날짜, 그 과목 시간표·달력 일정 제목과 함께 이 PC의 Codex로 보내 휴강·시험·과제 날짜를 찾습니다. 공지마다 한 번(고쳐지면 다시) 보내고, 녹음 중에는 보내지 않습니다. 첨부 파일, 고르지 않은 과목, 소리는 보내지 않습니다. 찾은 날짜는 확정 전까지 달력의 후보입니다.</small>`;
+  }
+
+  /* AI app link (D-072): the master switch, the courses an AI app may read (each one stored only through the native
+     consent dialog), and what to paste into the AI app. D-076: [연결] writes only Lecture Hub's own entry into that
+     app's settings file, after one native dialog; [연결 해제] takes out exactly that. */
+  function aiLinkSection(L) {
+    if (!L || !L.ok) return `<h5>AI 앱 연결</h5><p class="err">${esc((L && L.error) || "AI 앱 연결 상태를 읽지 못했습니다")}</p>`;
+    const items = (L.courses || []).map((c) => `<label class="dlg-check"><input type="checkbox" data-ailink-course="${esc(c.course)}"${c.allowed ? " checked" : ""}${L.enabled ? "" : " disabled"}> ${esc(c.course)}</label>`);
+    const courses = items.length ? foldList("ailink-courses", items, "하나씩 고르기", { wrap: "ailink-courses" }) : "<small>시간표에 과목을 먼저 추가하세요.</small>";
+    const snip = (key, title, hint) => `<div class="ailink-snip"><div class="ca ailink-head"><b>${title}</b><button data-a="ailink-copy" data-id="${key}">${ic("copy")} 복사</button></div>` +
+      `<small>${hint}</small><pre class="ailink-code">${esc(L[key])}</pre></div>`;
+    // D-076: [연결] writes only Lecture Hub's own entry into that app's settings file, after a native dialog
+    const APP_STATE = { connected: ["on", "연결됨"], manual: ["on", "연결됨(직접 넣은 설정)"], elsewhere: ["warn", "다른 경로로 연결됨"], off: ["off", "연결 안 됨"], unsupported: ["off", "붙여 넣기로"], error: ["warn", "파일을 읽지 못함"] };
+    const appRow = (x) => {
+      const [cls, txt] = APP_STATE[x.state] || ["off", x.state], off = L.enabled ? "" : " disabled";
+      const acts = x.state === "unsupported" ? "" : x.state === "connected" ? `<button class="ghost" data-a="ailink-disconnect" data-id="${x.app}">연결 해제</button>`
+        : x.state === "manual" ? "" : `<button data-a="ailink-connect" data-id="${x.app}"${off || (x.state === "error" ? " disabled" : "")}>${x.state === "elsewhere" ? "다시 연결" : esc(x.label.split(" ·")[0]) + "에 연결"}</button>`;
+      const why = x.message ? `<small>${esc(x.message)}</small>` : x.state === "elsewhere" ? (x.why === "env" ? `<small>지금 설정은 다른 학기 폴더나 설정 파일을 가리킵니다. [다시 연결]은 이 부분만 지금 앱에 맞게 바꿉니다.</small>`
+        : `<small>지금 설정은 다른 프로그램(${esc(x.command || "")})을 가리킵니다. [다시 연결]은 이 부분만 이 앱으로 바꿉니다.</small>`) : x.state === "manual" ? `<small>직접 넣은 설정이라 [연결 해제]로 지우지 않습니다.</small>` : "";
+      return `<div class="permission-row ailink-app"><span><b>${esc(x.label)}</b> <span class="pill ${cls}">${txt}</span><br><small class="path">${esc(x.path)}</small>${why}</span><span class="ca">${acts}</span></div>`;
+    };
+    const apps = (L.apps || []).map(appRow).join("");
+    const codexBtn = `<button data-a="ailink-codex"${L.enabled ? "" : " disabled"}>ChatGPT(Codex)로 열기</button>`;
+    const changeRow = (c) => `<div class="permission-row consent-row ai-change"><span>${esc(c.summary || c.tool)}<small> · ${esc(c.course || "")} · ${esc((c.at || "").replace("T", " ").slice(0, 16))}${c.undone ? " · 되돌림" : ""}</small></span>` +
+      (c.undoable ? `<span class="ca"><button class="ghost" data-a="ai-undo" data-id="${esc(c.id)}">되돌리기</button>` +
+        `<button class="ghost" data-a="ai-undo-since" data-id="${esc(c.id)}" data-at="${esc((c.at || "").replace("T", " ").slice(0, 16))}" title="이 항목과 그 뒤에 AI 앱이 바꾼 것을 새것부터 모두 되돌립니다">이 시각 이후 모두 되돌리기</button></span>` : "") + `</div>`;
+    const changed = (L.changes || []).map(changeRow);
+    // D-080: per kind of change "묻기" (Lecture Hub's own dialog first) or "자동"; going to 자동 needs a native dialog
+    const kinds = L.auto || [], kindOff = L.enabled && L.write ? "" : " disabled";
+    const autoRows = kinds.map((k) => `<label class="permission-row ailink-auto">${esc(k.label)}<select data-ailink-auto="${esc(k.kind)}"${kindOff}>` +
+      `<option value="ask"${k.auto ? "" : " selected"}>묻기</option><option value="auto"${k.auto ? " selected" : ""}>자동</option></select></label>`).join("");
+    const autoBlock = kinds.length ? `<div class="pick-head"><b>바꾸기 전에 묻기</b><span><button class="ghost" data-a="ailink-auto-all"${kinds.every((k) => k.auto) || kindOff ? " disabled" : ""}>모두 자동</button>` +
+      `<button class="ghost" data-a="ailink-auto-reset"${kinds.some((k) => k.auto) ? "" : " disabled"}>모두 다시 묻기</button></span></div>${autoRows}` +
+      `<small>묻기: AI 앱이 바꾸려 할 때마다 Lecture Hub가 화면에 확인 창을 띄웁니다(50초 안에 고르지 않으면 바꾸지 않음). 확인 창에서 [이 종류는 앞으로 자동]을 누르거나 여기서 '자동'으로 바꾼 종류는 묻지 않고 바로 바꿉니다. 시간표에서 과목을 빼거나 시간표 전체를 바꾸는 요청은 '자동'이어도 항상 묻습니다.</small>` : "";
+    // ChatGPT · Codex first (D-073); the paste-in texts fold together for other apps
+    return `<h5>AI 앱 연결</h5><div class="ailink">
+      <label class="dlg-check"><input type="checkbox" data-ailink${L.enabled ? " checked" : ""}> ChatGPT(Edu)·Codex, Claude 같은 AI 앱이 고른 과목의 수업 자료를 읽게 하기 (MCP)</label>
+      ${moreText("ailink-how", "AI 앱이 이 PC에서 Lecture Hub를 직접 실행해 물어봅니다. 중간에 인터넷 서버를 거치지 않습니다. 끄면 바로 아무것도 건네지 않습니다. 켜 두면 강의자료(PDF·PPTX)의 글을 앱이 뒤에서 미리 뽑아 둡니다. 녹음 중에는 쉬고, 끝나면 이어서 합니다.")}
+      <label class="dlg-check"><input type="checkbox" data-ailink-write${L.write ? " checked" : ""}${L.enabled ? "" : " disabled"}> AI 앱이 고칠 수 있게 (말하면 일정 넣기·고치기, 정리본 새로 저장)</label>
+      ${moreText("ailink-write-how", "켜면 AI 앱에 'OO 시험 12월 9일 넣어 줘', '이 회차 정리본 써서 저장해 줘'라고 할 수 있습니다. 종류마다 처음에는 Lecture Hub가 화면에 확인 창을 띄워 무엇을 바꾸는지 보여 주고 묻습니다. '자동'으로 둔 종류는 묻지 않고 바로 들어갑니다. 고른 과목에만, AI 앱이 넣은 일정만 고치거나 지울 수 있고(eTL·직접 넣은 일정은 못 건드림), 정리본은 언제나 새 파일로 저장해 기존 것을 덮어쓰지 않습니다. 바뀐 것은 아래 'AI가 바꾼 것'에 남고 하나씩 되돌릴 수 있습니다. 켜거나 끈 뒤에는 AI 앱을 다시 시작하세요.")}
+      ${autoBlock}
+      <div class="pick-head"><b>보여 줄 과목</b>${items.length ? pickAll("ailink", { ailink: L }, !L.enabled) : ""}</div>${courses}
+      <small>건네는 것: 고른 과목의 전사 글, 정리본, 강의자료 글, 달력 일정, 앱이 받아 둔 eTL 공지와 과제 목록(제출 상태, 점수 없음), 비밀값 없는 설정 개요, 시간표(강의자 이름 없음), 회차 처리·공지 읽기 상태와 AI 변경 기록. 건네지 않는 것: 녹음 파일(소리), 고르지 않은 과목, 과목 없는 개인 일정, eTL 토큰·API 키·계정 이름·절대 경로. 건넨 글을 AI 앱이 어떻게 보관하고 쓰는지는 그 앱과 계정의 약관을 따릅니다.</small>
+      ${moreText("ailink-ask", "이렇게 부탁해 보세요: '앱 설정이 잘 되어 있는지 점검해 줘'(app-checkup · get_app_status), '이번 주 휴강·보강 반영 시간표 보여 줘'(get_timetable), '이 회차에서 공지를 빠뜨리거나 잘못 읽은 게 있는지 전사와 대조해 줘'(check-notices · get_lecture_status), 'AI가 바꾼 것 알려 줘'(list_ai_changes). week-brief는 한 주 브리핑, review-plan은 복습 계획, note-from-lecture는 회차 정리본을 돕습니다. 누락 일정 추가는 비교 결과를 보고 사용자가 부탁할 때만 합니다. 되돌리기는 아래 AI가 바꾼 것에서 합니다.")}
+      <b>AI 앱에 연결</b>${apps}
+      <small>[연결]은 확인 창에 보이는 Lecture Hub 부분만 그 앱의 설정 파일에 넣습니다(처음 한 번 원래 파일을 .lecturehub-bak으로 남김). 넣은 뒤 그 앱을 다시 시작하세요.</small>
+      <div class="ca ailink-open">${codexBtn}<small>${L.codex_found === false ? "Codex(ChatGPT)가 이 PC에 없습니다. '연결 › 프로그램'의 설치 안내를 보세요." : "내 ChatGPT(Edu) 계정의 Codex를 열고 연결합니다. 계정 한도 안에서 쓰며 앱에서 별도 결제를 설정하지 않습니다."}</small></div>
+      <div class="pick-head"><b>AI가 바꾼 것</b></div>${changed.length ? foldList("ai-changes", changed, "AI가 바꾼 것", { limit: 6 }) : "<small>아직 AI 앱이 바꾼 것이 없습니다.</small>"}
+      ${fold("ailink-snips", "다른 AI 앱 · 직접 붙여 넣기", snip("codex", "ChatGPT 데스크톱 · Codex", "Codex 설정 파일(사용자 폴더의 .codex\\config.toml)에 넣으세요.") +
+        snip("claude_desktop", "Claude 데스크톱", "Claude 설정 → 개발자 → 설정 편집으로 연 파일에 넣고 Claude를 다시 켜세요. 이미 mcpServers가 있으면 그 안에 lecturehub 부분만 넣으세요.") +
+        snip("claude_code", "Claude Code", "터미널에서 한 번 실행하세요."), { count: "3개" })}
+      <small>확인한 것은 Codex 명령줄 도구와 Claude Code입니다. ChatGPT 데스크톱 앱과 Claude 데스크톱 앱은 직접 해 보지 않았습니다.</small></div>`;
+  }
+
+  // the clipboard API first; a hidden text box + copy command where the page may not use it
+  async function copyText(text, host) {
+    try { await navigator.clipboard.writeText(text); return true; } catch (err) { /* fall through */ }
+    const area = document.createElement("textarea");
+    area.value = text; area.setAttribute("readonly", ""); area.className = "ailink-copy-area";
+    (host || document.body).appendChild(area); area.select();
+    let ok = false;
+    try { ok = document.execCommand("copy"); } catch (err) { ok = false; }
+    area.remove();
+    return ok;
+  }
+
+  function remindersSection(R) {
+    if (!R || !R.ok) return "";
+    const rows = (R.courses || []).map((c) => `<label class="dlg-check"><input type="checkbox" data-mute-course="${esc(c.course)}"${c.muted ? " checked" : ""}> ${esc(c.course)}</label>`);
+    return `<label class="dlg-check"><input type="checkbox" data-local-alert="deadlines"${R.deadlines ? " checked" : ""}> 과제 마감·시험 미리 알림</label>` +
+      `<label class="dlg-check"><input type="checkbox" data-local-alert="briefing"${R.briefing ? " checked" : ""}> 오전 7시 이후 오늘 일정 한 번 알리기</label>` +
+      `<small>앱이 실행 중일 때(창을 숨긴 동안 포함) 이 PC에서만 계산합니다. 과제는 24시간·3시간 전, 시험은 전날 21시·1시간 전(시각 미정이면 당일 8시)에 알립니다. 앱 종료·PC 꺼짐·절전 중에는 알리지 못하며, 놓친 알림은 2시간 안이고 일정이 남았을 때만 알립니다. 로그인 뒤에도 받으려면 아래 두 설정을 켜세요. Windows 알림 설정도 켜져 있어야 합니다.</small>` +
+      `<div class="pick-head"><b>알림 끄기</b>${rows.length ? pickAll("mute", { reminders: R }) : ""}</div>` +
+      (rows.length ? foldList("mute-courses", rows, "하나씩 고르기") : "<small>시간표에 과목을 먼저 추가하세요.</small>") +
+      `<small>체크한 과목은 마감·시험·오늘 일정과 eTL 소식을 Windows 알림으로 알리지 않습니다. 홈의 오늘 카드에는 계속 보입니다.</small>`;
+  }
+  function stayRows(S) {
+    if (!S || !S.ok) return `<small>${esc(S && S.error || "앱 실행 설정을 불러오지 못했습니다.")}</small>`;
+    const A = S.startup || {};
+    return `<label class="dlg-check"><input type="checkbox" data-stay${S.keep_running === true ? " checked" : ""}> 창을 닫아도 알림 받기</label>` +
+      `<small>${S.keep_running == null ? "아직 고르지 않았습니다. 알림이 켜져 있으면 처음 닫을 때 한 번 묻습니다. " : ""}창을 닫으면 알림 영역에 남습니다. 아이콘 클릭으로 열고, 오른쪽 클릭 → 끝내기로 종료합니다. 아이콘을 만들 수 없으면 작업 표시줄로 내립니다. 끄면 다음에 창을 닫을 때 종료합니다. 녹음 중 닫기는 계속 작업 표시줄로 내립니다.</small>` +
+      (A.store ? `<div class="permission-row"><span>Windows를 켤 때 Lecture Hub도 켜기</span><button data-a="startup-settings">Windows 시작 앱 설정 열기</button></div><small>Store판은 Windows 설정에서 Lecture Hub를 직접 켜거나 끕니다(처음에는 꺼짐). 현재 상태도 그곳에서 확인하세요.</small>` :
+        `<label class="dlg-check"><input type="checkbox" data-startup${A.enabled === true ? " checked" : ""}${!A.possible ? " disabled" : ""}> Windows를 켤 때 Lecture Hub도 켜기</label><small>${esc(A.error || "처음에는 꺼져 있습니다. 켜면 로그인할 때 창을 숨기고 시작합니다. Windows의 시작 앱 설정에서 사용 안 함으로 두면 실행되지 않을 수 있습니다.")}</small>`) +
+      `<div class="ca"><button data-a="quit-app">Lecture Hub 끝내기</button><small>다음 실행 전까지 알림이 멈춥니다. 녹음 중에는 녹음을 끝낸 뒤 종료하세요.</small></div>`;
+  }
+  /* `group`: open on that menu group (e.g. "ai" from the class-notice banner); without it, the last one shown */
+  async function openSettings(group) {
+    if (SETTINGS_GROUPS.some((g) => g.id === group)) settingsView.group = group;
     const scrim = document.createElement("div");
     scrim.className = "scrim setup";
     document.body.appendChild(scrim); keepFocus(scrim, () => { scrim.remove(); loadEngines(); });
@@ -3195,61 +3540,197 @@
       s.layout = await api.folder_layout_get();
       s.cleanup = await api.audio_cleanup_get();
       s.live = await api.live_engine_get();
-      const gsrPrefs = s.labs.gsr && (ui.info.edition || {}).name !== "public";
-      if (gsrPrefs && !gsr) {  // the owner's 그스룸 list and room order (full build only), loaded once and kept while typing
-        const [c, r] = [await api.gsr_companions_get(), await api.gsr_rooms_get()];
-        if (c.ok && r.ok) gsr = { rows: matesFrom(c.rows), rooms: { ...r.rooms, avoid: r.rooms.avoid.join(" "), center: r.rooms.center == null ? "" : String(r.rooms.center), floor_first: r.rooms.floor_first ? String(r.rooms.floor_first) : "" }, msg: "", rmsg: "" };
-      }
-      s.gsr = gsrPrefs ? gsr : null;
+      s.about = await api.about();
+      s.consents = await api.consent_list();
+      s.ailink = await api.ai_link_status();
+      s.notices = await api.notices_setting_get();
+      s.etlNotify = api.etl_notify_get ? await api.etl_notify_get() : null;
+      s.reminders = api.reminders_get ? await api.reminders_get() : null;
+      s.stay = api.stay_get ? await api.stay_get() : null;
+      s.update = await api.update_status(false);
+
       ui.ai = s.ai;
       if (ui.info && Array.isArray(s.features)) { ui.info.features = Object.fromEntries(s.features.map((f) => [f.id, f])); renderLive(); }
       last = s;
       draw(s);
     }
-    let gsr = null;  // 그스룸 saved companions + room order being edited (full build)
+
+    const report = { plan: null, msg: "" };  // problem report: the list of what goes in is shown before it is made
     let last = null;  // the whole screen state: a "checking…" redraw reuses it (conn_status alone lacks the AI/layout parts)
     function draw(s) {
-      const old = scrim.querySelector(".dialog"), keep = old ? [old.scrollTop, scrim.scrollTop] : null;  // a redraw keeps the place
+      const oldPane = scrim.querySelector(".set-pane");  // a redraw keeps the group's place (and where the focus was)
+      if (oldPane && oldPane.dataset && oldPane.dataset.pane) settingsView.scroll[oldPane.dataset.pane] = oldPane.scrollTop;
+      const focusAt = focusKey(document.activeElement);
       const features = s.features.map((f) => { const [cls, txt] = FEATURE_BADGE[f.state]; return `<tr><td>${esc(f.label)}</td><td><span class="pill ${cls}">${txt}</span></td><td>${esc(f.hint)}</td></tr>`; }).join("");
       const keys = s.keys.map((k) => `<div class="conn" data-id="${esc(k.id)}">
         <div class="ct"><b>${esc(k.label)}</b> <span class="pill ${k.connected ? "on" : "off"}">${k.connected ? "연결됨" + (k.source === "env" ? " (환경 변수)" : "") : "연결 안 됨"}</span></div>
         <div class="cn">${esc(k.steps)} ${esc(k.note)}</div>
+        ${k.site ? `<div class="cn">학교: ${k.site.default ? "서울대 eTL (myetl.snu.ac.kr)" : esc(k.site.base)} <button class="ghost" data-a="etlsite" ${busy ? "disabled" : ""}>다른 학교 Canvas</button></div>` : ""}
         <div class="ca"><button data-a="connect" ${busy ? "disabled" : ""}>${k.connected ? "키 바꾸기" : "연결"}</button>
           ${k.connected ? `<button data-a="test" ${busy ? "disabled" : ""}>테스트</button><button class="ghost" data-a="remove">연결 끊기</button>` : ""}
-          <button class="ghost" data-a="help">키 받는 곳 ↗</button><span class="cmsg${note[k.id] ? " " + note[k.id].tone : ""}" id="cm-${esc(k.id)}">${busy === k.id ? "서비스에 확인하는 중… (몇 초)" : note[k.id] ? esc(note[k.id].text) : ""}</span></div></div>`).join("");
-      const tools = s.tools.map((t) => `<tr><td>${esc(t.label)}</td><td>${t.found ? "✓ 있음" : t.required ? "✕ 필요" : "– 없음(선택)"}${t.signed_in === true ? " · 로그인됨" : t.signed_in === false ? " · 로그인 필요" : ""}</td>
-        <td>${esc(t.needed_for)}${t.found ? "" : `<br><small>${esc(t.hint)}</small>`}</td><td>${t.help_url && !t.found ? `<button class="ghost" data-a="thelp" data-id="${esc(t.id)}">설치 안내 ↗</button>` : ""}</td></tr>`).join("");
-      scrim.innerHTML = `<div class="dialog wide" role="dialog"><h4>설정 · 연결</h4>
-        <h5>화면</h5><div class="appearance-row"><label>테마 <select data-appearance="theme">${[["system", "시스템"], ["light", "밝게"], ["dark", "어둡게"]].map(([k,v]) => `<option value="${k}"${s.appearance?.theme === k ? " selected" : ""}>${v}</option>`).join("")}</select></label>
-        <label>본문 글자 크기 <select data-appearance="text_size">${[["normal", "보통"], ["large", "크게"], ["larger", "더 크게"]].map(([k,v]) => `<option value="${k}"${s.appearance?.text_size === k ? " selected" : ""}>${v}</option>`).join("")}</select></label></div>
-        <h5>시간표 · 학기</h5><p>과목 순서, 녹음 과목 자동 선택, 수업 알림, 빠진 녹음 찾기가 이 시간표를 따릅니다.</p>
-        <div class="ca"><button data-a="tt">시간표·학기 편집</button><label class="dlg-check"><input type="checkbox" data-reminder${ui.info.class_reminder ? " checked" : ""}> 수업 시간이 되면 녹음할지 묻기</label></div>
-        ${layoutSection(s.layout, "set")}
-        <h5>녹음 자동 정리</h5>${cleanupRow(s.cleanup)}
-        <h5>AI 엔진</h5><p>전사·자료 글의 정리와 그스룸 지시 해석에 쓸 엔진입니다. 녹음 전사는 별도 Google/Groq 연결을 씁니다.</p>
-        ${[["default", "기본"], ["notes", "정리본·HTML 도우미"], ["gsr_chat", "그스룸 지시 해석"]].map(([key,label]) => `<label class="permission-row">${label}<select data-ai-feature="${key}">${(key === "default" ? [] : [["inherit", "기본값 따름"]]).concat(Object.entries(s.ai.choices)).map(([k,v]) => `<option value="${k}"${(s.ai.settings[key] || (key === "default" ? "codex" : "inherit")) === k ? " selected" : ""}>${esc(v)}</option>`).join("")}</select></label>`).join("")}
-        ${s.ai.env_override ? `<small>환경 변수로 엔진이 고정되어 있습니다.</small>` : ""}
-        ${s.live ? `<label class="permission-row">실시간 전사<select data-live-engine>${Object.entries(s.live.choices).map(([k, v]) => `<option value="${k}"${s.live.engine === k ? " selected" : ""}>${esc(v)}</option>`).join("")}</select></label><small>다음에 실시간 전사를 켤 때부터 적용됩니다. Chirp 3은 Google Cloud CLI 로그인과 프로젝트가 필요합니다.</small>` : ""}
-        <h5>기능 상태</h5><table class="tools">${features}</table>
-        <h5>과목별 녹음 허락</h5><p>녹음 허락과 외부 AI 전송 동의는 따로 확인합니다. 허락 상태는 이 학기 폴더에 저장합니다.</p>
-        ${(s.permissions?.courses || []).map((c) => `<label class="permission-row">${esc(c.course)} <select data-permission="${esc(c.course)}">${Object.entries(s.permissions.states).map(([key, label]) => `<option value="${key}"${c.state === key ? " selected" : ""}>${esc(label)}</option>`).join("")}</select></label>`).join("") || "<small>시간표에 과목을 먼저 추가하세요.</small>"}
-        <h5>계정 연결</h5>${keys}
-        <h5>프로그램</h5><table class="tools">${tools}</table>
-        <h5>실험실 (선택 기능)</h5><div class="labs">${Object.entries(s.lab_names).map(([k, name]) => `<label class="dlg-check"><input type="checkbox" data-lab="${esc(k)}"${s.labs[k] ? " checked" : ""}> ${esc(name)}</label>`).join("")}
-          <small>켜면 왼쪽 메뉴에 나타납니다. 필요한 프로그램이 없으면 위 '기능 상태'에 안내가 나옵니다.</small></div>
-        ${s.gsr ? `<h5>그스룸</h5><div class="gsrc"><b>함께 쓰는 사람 (미리 채우기)</b><small>예약 화면의 '함께 쓰는 사람' 칸에 미리 채워집니다. 이 PC 설정 파일에만 저장되고 앱 코드나 기록에는 들어가지 않습니다. 본인이 직접 아는 사람만 넣으세요.</small>
-          ${matesHtml(s.gsr.rows)}<div class="ca"><button data-a="gsrsave">저장</button><span class="cmsg">${esc(s.gsr.msg)}</span></div>
-          <b>빈 방 고르는 순서</b><small>여러 방이 비어 있을 때 먼저 잡을 방입니다. 비워 두면 '예약 뒤에도 비는 방 → 방 이름순'으로 고릅니다.</small>
-          <div class="gsr-rooms"><label>먼저 볼 층 <select data-g="floor_first">${[["", "상관없음"], ["4", "4층"], ["2", "2층"]].map(([k, v]) => `<option value="${k}"${s.gsr.rooms.floor_first === k ? " selected" : ""}>${v}</option>`).join("")}</select></label>
-            <label>뒤로 미룰 방 <input class="ask" data-g="avoid" value="${esc(s.gsr.rooms.avoid)}" placeholder="예: G404 G405"></label>
-            <label>가까운 방 번호 <input class="ask short" data-g="center" value="${esc(s.gsr.rooms.center)}" placeholder="416" inputmode="decimal"></label>
-            <label class="dlg-check"><input type="checkbox" data-g="prefer_monitor"${s.gsr.rooms.prefer_monitor ? " checked" : ""}> 모니터 있는 방 먼저</label></div>
-          <div class="ca"><button data-a="gsrrooms">순서 저장</button><span class="cmsg">${esc(s.gsr.rmsg)}</span></div></div>` : ""}
+          <button class="ghost" data-a="help">키 받는 곳 ${ic("ext")}</button><span class="cmsg${note[k.id] ? " " + note[k.id].tone : ""}" id="cm-${esc(k.id)}">${busy === k.id ? "서비스에 확인하는 중… (몇 초)" : note[k.id] ? esc(note[k.id].text) : ""}</span></div></div>`).join("");
+      const toolRow = (t) => `<tr><td>${esc(t.label)}</td><td>${t.found ? ic("tick") + " 있음" : t.required ? ic("alert") + " 필요" : "없음(선택)"}${t.signed_in === true ? " · 로그인됨" : t.signed_in === false ? " · 로그인 필요" : ""}</td>
+        <td>${esc(t.needed_for)}${t.found ? "" : `<br><small>${esc(t.hint)}</small>`}</td><td>${t.help_url && !t.found ? `<button class="ghost" data-a="thelp" data-id="${esc(t.id)}">설치 안내 ${ic("ext")}</button>` : ""}</td></tr>`;
+      // what is there, what recording needs and Codex (the default AI) stay in view; other optional programs that are missing fold
+      const shown = s.tools.filter((t) => t.found || t.required || t.id === "codex"), rest = s.tools.filter((t) => !shown.includes(t));
+      const consentRows = (s.consents && s.consents.rows) || [];
+      const permissionRows = (s.permissions?.courses || []).map((c) => `<label class="permission-row">${esc(c.course)} <select data-permission="${esc(c.course)}">${Object.entries(s.permissions.states).map(([key, label]) => `<option value="${key}"${c.state === key ? " selected" : ""}>${esc(label)}</option>`).join("")}</select></label>`);
+      const SECTION = {
+        appearance: () => `<h5>화면</h5><div class="appearance-row"><label>테마 <select data-appearance="theme">${[["system", "시스템"], ["light", "밝게"], ["dark", "어둡게"]].map(([k,v]) => `<option value="${k}"${s.appearance?.theme === k ? " selected" : ""}>${v}</option>`).join("")}</select></label>
+          <label>본문 글자 크기 <select data-appearance="text_size">${[["normal", "보통"], ["large", "크게"], ["larger", "더 크게"]].map(([k,v]) => `<option value="${k}"${s.appearance?.text_size === k ? " selected" : ""}>${v}</option>`).join("")}</select></label></div>`,
+        timetable: () => `<h5>시간표 · 학기</h5><p>과목 순서, 녹음 과목 자동 선택, 수업 알림, 빠진 녹음 찾기가 이 시간표를 따릅니다.</p><div class="ca"><button data-a="tt">시간표·학기 편집</button><button data-a="tt-photo">사진으로 시간표 넣기 (ChatGPT·Codex)</button></div><small>사진 한 장을 이 PC의 Codex에 붙여 열고, Codex가 읽은 시간표를 확인한 뒤 넣습니다. 'AI 앱 연결'과 'AI 앱이 고칠 수 있게'가 켜져 있어야 합니다. 사진은 내 Codex 로그인으로 OpenAI에 보내집니다.</small>`,
+        layout: () => layoutSection(s.layout, "set"),
+        alerts: () => `<h5>알림 · 업데이트</h5><label class="dlg-check"><input type="checkbox" data-reminder${ui.info.class_reminder ? " checked" : ""}> 수업 시간이 되면 녹음할지 묻기</label>${remindersSection(s.reminders)}${stayRows(s.stay)}${etlNotifyRows(s.etlNotify)}${updateRow(s.update)}`,
+        permission: () => `<h5>과목별 녹음 허락</h5><p>녹음 허락과 외부 AI 전송 동의는 따로 확인합니다. 허락 상태는 이 학기 폴더에 저장합니다.</p>` +
+          (permissionRows.length ? `<div class="pick-head"><b>과목 ${permissionRows.length}개</b>${pickAll("permission", s)}</div>${foldList("permission", permissionRows, "하나씩 고르기")}` : "<small>시간표에 과목을 먼저 추가하세요.</small>"),
+        cleanup: () => `<h5>녹음 자동 정리</h5>${cleanupRow(s.cleanup)}`,
+        live: () => s.live ? `<h5>실시간 전사 엔진</h5><p>녹음 전사는 Groq(Whisper)와 Google(Gemini)의 무료 사용 한도 안에서 씁니다. 상단 전사 상태를 누르면 이 앱이 계산한 남은 양을 봅니다.</p><label class="permission-row">실시간 전사<select data-live-engine>${Object.entries(s.live.choices).map(([k, v]) => `<option value="${k}"${s.live.engine === k ? " selected" : ""}>${esc(v)}</option>`).join("")}</select></label><small>다음에 실시간 전사를 켤 때부터 적용됩니다. Chirp 3은 Google Cloud CLI 로그인과 프로젝트가 필요합니다.</small>` : "",
+        ai_engine: () => `<h5>AI 엔진</h5><p>Codex는 내 ChatGPT(Edu) 계정 한도 안에서 정리본과 수업 중 공지를 찾고 AI 앱을 연결합니다. 앱에서 별도 결제를 설정하지 않습니다. 녹음 전사는 Google/Groq 연결을 씁니다.</p>
+          ${[["default", "기본"], ["notes", "정리본·HTML 도우미"]].map(([key,label]) => `<label class="permission-row">${label}<select data-ai-feature="${key}">${(key === "default" ? [] : [["inherit", "기본값 따름"]]).concat(Object.entries(s.ai.choices)).map(([k,v]) => `<option value="${k}"${(s.ai.settings[key] || (key === "default" ? "codex" : "inherit")) === k ? " selected" : ""}>${esc(v)}</option>`).join("")}</select></label>`).join("")}
+          ${s.ai.env_override ? `<small>환경 변수로 엔진이 고정되어 있습니다.</small>` : ""}`,
+        notices: () => s.notices && s.notices.ok ? noticesSection(s.notices) : `<h5>수업 중 공지 찾기</h5><p class="err">${esc((s.notices && s.notices.error) || "설정을 읽지 못했습니다")}</p>`,
+        ailink: () => aiLinkSection(s.ailink),
+        keys: () => `<h5>계정 연결</h5><p>Groq(Whisper)·Google(Gemini)는 무료 사용 한도 안에서 전사합니다. 정리본·수업 중 공지 찾기·AI 앱 연결은 Codex를 통해 내 ChatGPT(Edu) 계정 한도 안에서 씁니다. 앱에서 별도 결제를 설정하지 않습니다.</p>${keys}`,
+        tools: () => `<h5>프로그램</h5><table class="tools">${shown.map(toolRow).join("")}</table>` +
+          (rest.length ? fold("tools-optional", "다른 선택 프로그램 · 없어도 녹음과 전사는 됩니다", `<table class="tools">${rest.map(toolRow).join("")}</table>`, { count: `${rest.length}개` }) : ""),
+        features: () => `<h5>기능 상태</h5><table class="tools">${features}</table>`,
+        consents: () => `<h5>외부 전송 동의</h5>${moreText("consents-about", "녹음이나 전사·자료 글을 외부 서비스로 보내도 된다고 저장해 둔 동의입니다. 철회하면 다음에 보낼 때 다시 묻습니다. 이미 보낸 내용은 여기서 되돌릴 수 없습니다.", "p")}` +
+          (consentRows.length ? fold("consents", "저장된 동의", consentRows.map((c) => `<div class="permission-row consent-row"><span>${esc(c.label)} · ${c.all_courses ? "이름 있는 모든 과목" : esc(c.course)}${c.granted_at ? `<small>(${new Date(c.granted_at).toLocaleDateString("ko-KR")} 동의)</small>` : ""}</span><button class="ghost" data-a="consent-revoke" data-provider="${esc(c.provider)}" data-course="${esc(c.course)}">철회</button></div>`).join(""), { count: `${consentRows.length}건`, cls: "consent-list" })
+            : "<small>저장된 동의가 없습니다. 보낼 때마다 먼저 묻습니다.</small>"),
+        labs: () => `<h5>실험실 (선택 기능)</h5><div class="labs">${Object.entries(s.lab_names).filter(([k]) => ed(k)).map(([k, name]) => `<label class="dlg-check"><input type="checkbox" data-lab="${esc(k)}"${s.labs[k] ? " checked" : ""}> ${esc(name)}</label>`).join("")}
+          <small>켜면 왼쪽 메뉴에 나타납니다. 필요한 프로그램이 없으면 '연결 › 기능 상태'에 안내가 나옵니다.</small></div>`,
+
+        about: () => aboutSection(s.about, report),
+      };
+      const group = SETTINGS_GROUPS.find((g) => g.id === settingsView.group) || SETTINGS_GROUPS[0];
+      settingsView.group = group.id;
+      const nav = SETTINGS_GROUPS.map((g) => `<button type="button" class="set-tab" data-a="group" data-id="${g.id}"${g.id === group.id ? ' aria-current="page"' : ""}>${ic(g.icon)}<span>${g.label}</span></button>`).join("");
+      scrim.innerHTML = `<div class="dialog wide settings" role="dialog"><div class="set-head"><h4>설정</h4></div>
+        <div class="set-body"><nav class="set-nav" aria-label="설정 메뉴">${nav}</nav>
+        <div class="set-pane" role="region" aria-label="${esc(group.label)}" data-pane="${group.id}">${group.sections.map((id) => SECTION[id]()).join("")}</div></div>
         <div class="acts"><button data-a="refind">프로그램 다시 찾기</button><button class="primary" data-a="done">닫기</button></div></div>`;
-      const dlg = scrim.querySelector(".dialog");
-      if (dlg && keep) { dlg.scrollTop = keep[0]; scrim.scrollTop = keep[1]; }
+      const pane = scrim.querySelector(".set-pane");
+      if (pane) pane.scrollTop = settingsView.scroll[group.id] || 0;
+      const back = focusAt && scrim.querySelector(focusAt);
+      if (back && back.focus) back.focus({ preventScroll: true });
     }
     scrim.addEventListener("change", async (e) => {
+      if (e.target.matches("[data-stay], [data-startup]")) {
+        let r;
+        try { r = e.target.matches("[data-stay]") ? await api.stay_set(e.target.checked) : await api.startup_set(e.target.checked); }
+        catch (err) { r = null; }
+        if (!r || !r.ok) toast(r && r.error || "설정을 저장하지 못했습니다");
+        await load(); return;
+      }
+      if (e.target.matches("[data-notices]")) {
+        // the box always shows what is saved: the cached screen state is updated (every redraw paints from it) and
+        // a save that failed puts the box back
+        let r;
+        try { r = await api.notices_setting_set(e.target.checked); } catch (err) { r = null; }
+        if (!r || !r.ok) r = { ok: false, error: (r && r.error) || "설정을 저장하지 못했습니다" };
+        else if (last) last.notices = { ...last.notices, ...r };
+        const box = scrim.querySelector("[data-notices]");  // the one on screen now (a redraw may have replaced it)
+        if (box) box.checked = !!(last && last.notices && last.notices.on);
+        toast(r.ok ? (r.on ? "수업 중 공지 찾기를 켰습니다" : "수업 중 공지 찾기를 껐습니다 · 이미 보내는 중인 것 말고는 더 보내지 않습니다") : r.error);
+        return;
+      }
+      if (e.target.matches("[data-notices-engine]")) {  // nothing is sent by choosing
+        const r = await api.notices_engine_set(e.target.value);
+        toast(r && r.ok ? (r.engine === "codex" ? "수업 중 공지를 ChatGPT(Codex)로 찾습니다 · 보낼 과목을 체크하세요" : "수업 중 공지를 Google Gemini로 찾습니다") : (r && r.error) || "설정을 저장하지 못했습니다");
+        await load(); return;
+      }
+      const etlNoticeCourse = e.target.closest("[data-etlnotices-course]");
+      if (etlNoticeCourse) {
+        const course = etlNoticeCourse.dataset.etlnoticesCourse;
+        let r;
+        if (etlNoticeCourse.checked) {  // its own consent, stored only with the native dialog's one-time token
+          const q = await api.consent_confirm("codex_etl_notices", course);
+          if (!q.ok) { toast(q.error); await load(); return; }
+          if (!q.yes) { await load(); return; }
+          r = await api.etl_notices_allow(course, q.token);
+          toast(r.ok ? `${course}: 새 eTL 공지를 ChatGPT(Codex)로 보내 일정을 찾습니다` : r.error);
+        } else {
+          r = await api.consent_revoke("codex_etl_notices", course);
+          toast(r.ok ? `${course}: eTL 공지를 더는 보내지 않습니다` : r.error);
+        }
+        await load(); return;
+      }
+      const notify = e.target.closest("[data-etl-notify]");
+      const localAlert = e.target.closest("[data-local-alert]"), muteCourse = e.target.closest("[data-mute-course]");
+      if (localAlert || muteCourse) {
+        const muted = new Set((last.reminders || {}).muted_courses || []);
+        if (muteCourse) { if (muteCourse.checked) muted.add(muteCourse.dataset.muteCourse); else muted.delete(muteCourse.dataset.muteCourse); }
+        const changes = localAlert ? { [localAlert.dataset.localAlert]: localAlert.checked } : { muted_courses: [...muted] };
+        const r = await api.reminders_set(changes);
+        if (!r.ok) toast(r.error);
+        await load(); return;
+      }
+      if (notify) {  // nothing is sent anywhere: which eTL changes become a Windows notification
+        const r = await api.etl_notify_set(notify.dataset.etlNotify, notify.checked);
+        if (r && r.ok && last) last.etlNotify = r;
+        else notify.checked = !notify.checked;
+        toast(r && r.ok ? `${(r.labels || {})[notify.dataset.etlNotify] || "eTL 알림"}: ${notify.checked ? "알려 줍니다" : "알리지 않습니다"}` : (r && r.error) || "설정을 저장하지 못했습니다");
+        return;
+      }
+      const noticeCourse = e.target.closest("[data-notices-course]");
+      if (noticeCourse) {
+        const course = noticeCourse.dataset.noticesCourse;
+        let r;
+        if (noticeCourse.checked) {  // stored only with the native dialog's one-time token (like every other consent)
+          const q = await api.consent_confirm("codex_notices", course);
+          if (!q.ok) { toast(q.error); await load(); return; }
+          if (!q.yes) { await load(); return; }
+          r = await api.notices_allow(course, q.token);
+          toast(r.ok ? `${course}: 새 전사를 ChatGPT(Codex)로 보내 공지를 찾습니다` : r.error);
+        } else {
+          r = await api.consent_revoke("codex_notices", course);
+          toast(r.ok ? `${course}: 수업 중 공지 찾기에 더는 보내지 않습니다` : r.error);
+        }
+        await load(); return;
+      }
+      if (e.target.matches("[data-update-check]")) { await api.update_set(e.target.checked); return; }
+      const autoKind = e.target.closest("[data-ailink-auto]");
+      if (autoKind) {  // D-080: 자동 is a standing permission, stored only with the native dialog's one-time token
+        const kind = autoKind.dataset.ailinkAuto;
+        const label = (((last && last.ailink && last.ailink.auto) || []).find((k) => k.kind === kind) || {}).label || kind;
+        let r;
+        if (autoKind.value === "auto") {
+          const q = await api.ai_link_auto_confirm(kind);
+          if (!q.ok) { toast(q.error); await load(); return; }
+          if (!q.yes) { await load(); return; }
+          r = await api.ai_link_auto(kind, true, q.token);
+        } else r = await api.ai_link_auto(kind, false);
+        toast(r.ok ? (autoKind.value === "auto" ? `${label}: 앞으로 묻지 않고 바로 바꿉니다` : `${label}: 바꾸기 전에 묻습니다`) : r.error);
+        await load(); return;
+      }
+      if (e.target.matches("[data-ailink-write]")) {
+        const r = await api.ai_link_write(e.target.checked);
+        toast(r.ok ? (r.write ? "AI 앱이 일정·정리본을 바꿀 수 있습니다 · AI 앱을 다시 시작하세요" : "AI 앱이 더는 바꾸지 못합니다(읽기는 그대로)") : r.error);
+        ui.aiLink = { enabled: !!(r.enabled), write: !!(r.write) };
+        await load(); return;
+      }
+      if (e.target.matches("[data-ailink]")) {
+        const r = await api.ai_link_enable(e.target.checked);
+        ui.aiLink = { enabled: !!(r.enabled), write: !!(r.write) };
+        toast(r.ok ? (r.enabled ? "AI 앱 연결을 켰습니다 · 보여 줄 과목을 고르세요(자료 글은 뒤에서 준비합니다)" : "AI 앱 연결을 껐습니다 · AI 앱에 아무것도 건네지 않습니다") : r.error);
+        await load(); return;
+      }
+      const linkCourse = e.target.closest("[data-ailink-course]");
+      if (linkCourse) {
+        const course = linkCourse.dataset.ailinkCourse;
+        let r;
+        if (linkCourse.checked) {  // stored only with the native dialog's one-time token (like every other consent)
+          const q = await api.consent_confirm("ai_app_link", course);
+          if (!q.ok) { toast(q.error); await load(); return; }
+          if (!q.yes) { await load(); return; }
+          r = await api.ai_link_allow(course, q.token);
+          toast(r.ok ? `${course}: 연결한 AI 앱이 읽을 수 있습니다` : r.error);
+        } else {
+          r = await api.consent_revoke("ai_app_link", course);
+          toast(r.ok ? `${course}: 더는 AI 앱에 건네지 않습니다(다음 요청부터)` : r.error);
+        }
+        await load(); return;
+      }
       if (e.target.matches("[data-live-engine]")) { const r = await api.live_engine_set(e.target.value); toast(r.ok ? "실시간 전사 엔진을 바꿨습니다 · 다음에 켤 때부터" : r.error); return; }
       const engine = e.target.closest("[data-ai-feature]");
       if (engine) { const r = await api.ai_select(engine.value, engine.dataset.aiFeature); if (!r.ok) toast(r.error); await load(); return; }
@@ -3274,32 +3755,99 @@
         toast(r.ok ? (r.enabled ? `Google 전사 ${r.days}일 뒤 녹음을 휴지통으로 보냅니다(정리본이 있는 회차만)` : "녹음 자동 정리를 껐습니다") : r.error);
         await load(); return;
       }
+      if (e.target.matches("[data-pick-state]")) { settingsView.pick[e.target.dataset.pickState] = e.target.value; return; }  // applied by [적용]
       const permission = e.target.closest("[data-permission]");
-      if (permission) { const r = await api.recording_permission(permission.dataset.permission, permission.value); if (!r.ok) { toast(r.error); await load(); } return; }
+      if (permission) {
+        const r = await api.recording_permission(permission.dataset.permission, permission.value);
+        if (!r.ok) { toast(r.error); await load(); return; }
+        const row = ((last && last.permissions && last.permissions.courses) || []).find((c) => c.course === permission.dataset.permission);
+        if (row) row.state = r.state || permission.value;  // the screen state stays true for [적용] and later redraws
+        return;
+      }
       const box = e.target.closest("[data-lab]"); if (!box) return;
       const r = await api.lab_set(box.dataset.lab, box.checked);
       if (r.ok) { ui.info.labs = r.labs; applyLabs(); await load(); } else toast(r.error);
     });
-    scrim.addEventListener("input", (e) => {
-      if (!gsr) return;
-      if (matesInput(e, gsr.rows)) return;
-      const g = e.target.closest("[data-g]"); if (g) gsr.rooms[g.dataset.g] = g.type === "checkbox" ? g.checked : g.value;
+
+    scrim.addEventListener("toggle", (e) => {  // toggle does not bubble: listen in the capture phase
+      if (e.target.matches && e.target.matches("details[data-fold]")) settingsView.folds[e.target.dataset.fold] = e.target.open;
+    }, true);
+    scrim.addEventListener("keydown", (e) => {  // the menu: arrow keys move to the next group and show it
+      const tab = e.target.closest && e.target.closest(".set-tab");
+      if (!tab || !["ArrowDown", "ArrowUp", "ArrowRight", "ArrowLeft", "Home", "End"].includes(e.key)) return;
+      e.preventDefault();
+      const ids = SETTINGS_GROUPS.map((g) => g.id), at = ids.indexOf(tab.dataset.id);
+      const next = e.key === "Home" ? 0 : e.key === "End" ? ids.length - 1 : (at + (["ArrowDown", "ArrowRight"].includes(e.key) ? 1 : ids.length - 1)) % ids.length;
+      settingsView.group = ids[next]; draw(last);
+      const now = scrim.querySelector(`.set-tab[data-id="${ids[next]}"]`); if (now) now.focus();
     });
     scrim.addEventListener("click", async (e) => {
-      if (gsr && matesClick(e.target, gsr.rows)) return draw(last);
+
       const b = e.target.closest("button[data-a]");
       if (!b) { if (e.target === scrim) scrim.remove(); return; }
       const a = b.dataset.a, row = b.closest(".conn"), id = row ? row.dataset.id : b.dataset.id;
+      if (a === "startup-settings") { const r = await api.startup_settings(); if (!r.ok) toast(r.error); return; }
+      if (a === "quit-app") { const r = await api.quit_app(); if (!r.ok) toast(r.error); return; }
       const say = (m) => { const el = scrim.querySelector("#cm-" + id); if (el) el.textContent = m; };
       if (a === "done") { scrim.remove(); loadEngines(); return; }
       if (a === "tt") { if (await openTimetable()) await load(); return; }
-      if (a === "refind") { await load(true); return; }
-      if (a === "gsrsave" && gsr) { const r = await api.gsr_companions_set(matesText(gsr.rows)); gsr.msg = r.ok ? `저장했습니다(${r.count}명)` : r.error; return draw(last); }
-      if (a === "gsrrooms" && gsr) {
-        const q = gsr.rooms, r = await api.gsr_rooms_set({ floor_first: q.floor_first, avoid: q.avoid, center: String(q.center).trim(), prefer_monitor: !!q.prefer_monitor });
-        gsr.rmsg = r.ok ? "저장했습니다" : r.error; return draw(last);
+      if (a === "tt-photo") {  // D-083: native file picker + native confirmation, then Codex with the picture attached
+        const q = await api.timetable_photo_confirm();
+        if (!q || !q.ok) { toast((q && q.error) || "사진을 열지 못했습니다."); return; }
+        if (!q.yes) return;
+        const r = await api.timetable_photo_open(q.token);
+        toast((r && r.message) || (r && r.ok ? "Codex를 열었습니다 · 읽은 시간표를 확인한 뒤 넣으라고 하세요(넣을 때 Lecture Hub가 다시 묻습니다)" : (r && r.error) || "Codex를 열지 못했습니다."));
+        return;
       }
+      if (a === "refind") { await load(true); return; }
+      if (a === "group") { settingsView.group = b.dataset.id; draw(last); return; }  // the menu (kept for this run)
+      if (a === "pick-all") { if (await runPickAll(b.dataset.id, b.dataset.to, last || {})) await load(); return; }
+      if (a === "ailink-copy") {
+        const text = last && last.ailink ? last.ailink[b.dataset.id] : "";
+        toast(text && (await copyText(text, scrim)) ? "복사했습니다 · AI 앱의 설정에 붙여 넣으세요" : "복사하지 못했습니다 · 글을 직접 골라 복사하세요");
+        return;
+      }
+      if (a === "ai-undo") { const r = await api.ai_change_undo(b.dataset.id); toast(r.ok ? r.message : r.error); await load(); return; }
+      if (a === "ailink-auto-all") {  // [모두 자동]: one native dialog naming every kind, then its one-time token
+        const q = await api.ai_link_auto_confirm("*");
+        if (!q.ok) { toast(q.error); return; }
+        if (!q.yes) return;
+        const r = await api.ai_link_auto("*", true, q.token);
+        toast(r.ok ? "모든 종류를 자동으로 · AI 앱이 묻지 않고 바로 바꿉니다(되돌리기는 'AI가 바꾼 것')" : r.error); await load(); return;
+      }
+      if (a === "ailink-auto-reset") { const r = await api.ai_link_auto_reset(); toast(r.ok ? "모든 종류를 다시 묻습니다 · AI 앱이 바꾸기 전에 확인 창을 띄웁니다" : r.error); await load(); return; }
+      if (a === "ai-undo-since") {  // after a run that went wrong: this item and everything after it, newest first
+        if (!(await dialog({ title: "AI가 바꾼 것 모두 되돌리기", body: `${b.dataset.at || "이 항목"} 이후 AI 앱이 바꾼 것을 새것부터 모두 되돌립니다. 그 뒤에 내가 고친 항목은 건너뜁니다.`, ok: "모두 되돌리기", cancel: "취소" }))) return;
+        const r = await api.ai_change_undo_since(b.dataset.id); toast(r.ok ? r.message : r.error); await load(); return;
+      }
+      if (a === "ailink-codex") { const r = await api.ai_link_open_codex(null); toast(r.message || (r.ok ? "Codex를 열었습니다 · Lecture Hub 도구가 이번 실행에 연결되어 있습니다" : r.error)); return; }
+      if (a === "ailink-disconnect") { const r = await api.ai_link_disconnect(b.dataset.id); toast(r.ok ? "연결을 뺐습니다 · 그 앱을 다시 시작하세요" : r.error); await load(); return; }
+      if (a === "ailink-connect") {
+        const q = await api.ai_link_connect_confirm(b.dataset.id);
+        if (!q.ok) { toast(q.error); return; }
+        if (!q.yes) return;
+        const r = await api.ai_link_connect(b.dataset.id, q.token);
+        toast(r.ok ? "연결했습니다 · 그 앱을 다시 시작하세요" : r.error); await load(); return;
+      }
+      if (a === "consent-revoke") { const r = await api.consent_revoke(b.dataset.provider, b.dataset.course); toast(r.ok ? "동의를 철회했습니다 · 다음에 보낼 때 다시 묻습니다" : r.error); await load(); return; }
+      if (a === "update-open") { const r = await api.update_open(); if (!r.ok) toast(r.error); return; }
+      if (a === "about-open") { const r = await api.about_open(b.dataset.id); if (!r.ok) toast(r.error); return; }
+      if (a === "report") {
+        if (!report.plan) { const r = await api.report_plan(); if (r.ok) report.plan = r; else report.msg = r.error; return draw(last); }
+        report.msg = "만드는 중…"; draw(last);
+        const r = await api.report_make();
+        report.msg = r.ok ? `만들었습니다: ${r.name} (탐색기에 표시)` : r.error; report.plan = null; return draw(last);
+      }
+
       if (a === "help" || a === "thelp") { await api.conn_open_help(id); return; }
+      if (a === "etlsite") {  // another school's Canvas (2026-11-20); blank = SNU's eTL. The old token is not sent to a new site.
+        const k = (last && last.keys || []).find((x) => x.id === "etl"), now = k && k.site && !k.site.default ? k.site.base : "";
+        const value = await askText({ title: "학교 Canvas 주소", ok: "저장", value: now, body: "학교 학습 사이트가 Canvas라면 그 주소를 넣으세요(예: canvas.school.ac.kr). 비워 두면 서울대 eTL입니다. 주소를 바꾸면 전에 저장한 토큰은 쓰지 않으니, 새 학교 Canvas에서 토큰을 만들어 다시 연결하세요." });
+        if (value === null || value === undefined) return;
+        const r = await api.conn_etl_site(value.trim());
+        toast(r.ok ? (r.default ? "서울대 eTL로 정했습니다" : `학교 Canvas를 ${r.base}로 정했습니다`) + (r.ok && !r.token_fits ? " · 토큰을 다시 연결하세요" : "") : r.error);
+        await load(); return;
+      }
       if (a === "remove") {
         if (!(await dialog({ title: "연결 끊기", body: "이 PC에 저장된 키를 지웁니다. 서비스 쪽 키는 그대로이니 필요하면 그곳에서 지우세요.", ok: "끊기", tone: "danger" }))) return;
         const r = await api.conn_remove(id); toast(r.ok ? (r.still_from_env ? "저장된 키를 지웠습니다. 환경 변수의 키는 남아 있습니다." : "끊었습니다") : r.error); await load(); return;
@@ -3384,6 +3932,7 @@
           const r = await api.timetable_save(st.courses.filter((c) => c.name), st.start, st.end);
           st.busy = false;
           if (!r.ok) { st.error = r.error || "저장하지 못했습니다."; draw(); return; }
+          if (r.message && !r.courses) { draw(); toast(r.message); return; }
           Object.assign(ui.info, await api.init());
           renderAll(); refreshCourse();
           const lib = r.library && r.library.error ? ` · ${r.library.error}` : "";
@@ -3407,23 +3956,66 @@
 
   function runSetup() {
     return new Promise((resolve) => {
-      const st = { step: 0, parent: "", term: "", courses: [{ name: "", slots: [{ day: "월", start: "09:00", end: "10:15" }] }], tools: {}, busy: false, error: "" };
+      const st = { step: 0, parent: "", term: "", courses: [{ name: "", slots: [{ day: "월", start: "09:00", end: "10:15" }] }], tools: {}, busy: false, error: "",
+        prepared: "", codex: null, codexMsg: "", wait: "", base: "", arrived: null, timer: null };
       const scrim = document.createElement("div");
       scrim.className = "scrim setup";
       document.body.appendChild(scrim); keepFocus(scrim);  // no Esc: the first-run notices must be confirmed
-      api.setup_info().then((info) => { st.parent = info.parent; st.term = info.term; st.tools = info.tools || {}; st.trialOffer = info.needs_setup || info.trial; draw(); });
+      api.setup_info().then((info) => {
+        st.parent = info.parent; st.parentNotes = info.parent_notes || []; st.term = info.term; st.tools = info.tools || {}; st.trialOffer = info.needs_setup || info.trial;
+        const p = info.prepared;  // D-086: the folder was made earlier and the app was closed half-way: go on from there
+        if (p && p.root) { st.prepared = p.root; st.parent = p.parent || st.parent; st.term = p.term || st.term; st.style = p.layout || ""; }
+        draw();
+      });
       const days = ["월", "화", "수", "목", "금", "토", "일"];
-      const steps = ["안내", "폴더", "시간표", "폴더 구성", "도구"];
+      // D-086: "ChatGPT(Codex) 연결" comes after the folder exists (setup_prepare at the end of 폴더 구성) and before the
+      // timetable; ORDER is the order shown, the numbers stay what each step's code checks
+      const steps = ["안내", "폴더", "시간표", "폴더 구성", "도구", "ChatGPT(Codex) 연결"];
+      const ORDER = [0, 1, 3, 5, 2, 4];
+      const linked = () => !!(st.codex && st.codex.config && st.codex.config.state === "connected" && st.codex.enabled && st.codex.write);
+      function codexBody() {
+        const c = st.codex, t = (c && c.tool) || {};
+        const where = st.prepared ? `<p class="hint">학기 폴더를 만들었습니다: <b>${esc(st.prepared)}</b></p>` : "";
+        if (!c) return `<p>Lecture Hub를 이 PC의 Codex(ChatGPT)에 연결하는 단계입니다.</p>${where}<p class="hint">Codex를 찾는 중…</p>`;
+        const login = t.signed_in === true ? " · 로그인됨" : t.signed_in === false ? " · 로그인 필요" : st.codexChecking ? " · 로그인 확인 중…" : "";
+        const lack = !t.found
+          ? `<p class="hint warn">${ic("alert")} Codex가 이 PC에 없습니다. ${esc(t.hint || "")} 설치한 뒤 [프로그램 다시 찾기]를 누르세요.</p>`
+          : t.signed_in === false ? `<p class="hint warn">${ic("alert")} Codex에 로그인하지 않았습니다. 명령 창에서 codex login으로 학교 ChatGPT 계정에 로그인한 뒤 [프로그램 다시 찾기]를 누르세요.</p>` : "";
+        const done = linked() ? `<p class="ok-line">${ic("tick")} 연결했습니다. 다음 단계에서 시간표 사진을 Codex로 넣거나, Codex가 묻는 대로 처음 설정을 할 수 있습니다. 열려 있던 Codex 창이 있으면 닫고 다시 여세요.</p>` : "";
+        return `<p>Lecture Hub를 이 PC의 Codex(ChatGPT)에 연결하면, Codex 창에서 "이 사진으로 시간표 넣어 줘"처럼 부탁해 시간표와 일정을 넣을 수 있습니다. 연결하지 않아도 앱은 그대로 쓸 수 있습니다.</p>${where}
+          <table class="tools"><tr><td>${esc(t.label || "Codex (ChatGPT 계정)")}</td><td>${t.found ? ic("tick") + " 있음" : "없음"}${login}</td></tr></table>${lack}${done}
+          <div class="row"><button class="primary" data-act="codex-connect"${t.found && !linked() && !st.busy ? "" : " disabled"}>Codex에 연결</button>
+            <button data-act="codex-refind"${st.busy ? " disabled" : ""}>프로그램 다시 찾기</button>${!t.found && t.help_url ? `<button class="ghost" data-act="codex-help">설치 안내 ${ic("ext")}</button>` : ""}</div>
+          ${st.codexMsg ? `<p class="hint">${esc(st.codexMsg)}</p>` : ""}
+          <p class="hint">[Codex에 연결]은 확인 창에 적힌 세 가지를 켭니다: Codex 설정 파일의 Lecture Hub 항목, 'AI 앱 연결', 'AI 앱이 고칠 수 있게'. Codex가 무언가 바꾸려 하면 바꿀 때마다 Lecture Hub가 화면에 묻습니다. 과목 자료를 읽게 하는 허용은 켜지 않습니다. 나중에 설정 › AI › AI 앱 연결에서 끌 수 있습니다.</p>
+          <p class="hint">[건너뛰기]를 누르면 아무것도 켜지 않고 다음으로 넘어갑니다.</p>`;
+      }
+      function waysBody() {  // the timetable step: type it, or let Codex put it in (D-083 picture, D-086 first-setup skill)
+        const on = linked() || !!(st.codex && st.codex.enabled && st.codex.write);
+        const off = on && st.prepared ? "" : " disabled";
+        const waiting = st.wait ? `<p class="setup-wait">${st.wait === "photo"
+            ? "Codex 창이 열렸습니다. Codex 창에서 읽은 시간표를 확인하면 Lecture Hub가 한 번 더 묻습니다. 허용하면 시간표가 여기에 나타납니다."
+            : "Codex 창이 열렸습니다. Codex가 묻는 말에 답하세요. Codex가 표를 보여 주고 확인을 받은 뒤 넣으면 Lecture Hub가 한 번 더 묻습니다. 허용하면 시간표가 여기에 나타납니다."}
+            기다리지 않고 아래에 직접 적어도 됩니다. <button class="ghost" data-act="wait-stop">기다리지 않기</button></p>` : "";
+        const came = st.arrived ? `<p class="ok-line">${ic("tick")} Codex가 넣은 시간표가 들어왔습니다(${st.arrived.count}과목). 아래에서 확인하고 고치거나 [다음]을 누르세요.${st.arrived.kept ? ` 직접 적은 과목 ${st.arrived.kept}개는 아래에 그대로 두었습니다.` : ""}</p>` : "";
+        return `<div class="setup-ways"><p><b>시간표를 넣는 방법</b> · 아래에 직접 적거나, Codex에 맡깁니다.</p>
+          <div class="row"><button data-act="tt-photo-setup"${off}>사진으로 넣기 (ChatGPT·Codex)</button><button data-act="codex-first"${off}>Codex로 처음 설정하기</button></div>
+          <p class="hint">${on && st.prepared ? "사진으로 넣기: 사진 한 장을 이 PC의 Codex에 붙여 엽니다. 사진은 확인 창을 거친 뒤 내 Codex 로그인으로 OpenAI에 보내집니다. Codex로 처음 설정하기: Codex 창에서 과목과 시간, 개강일과 종강일, 받을 알림을 하나씩 묻고 확인을 받은 뒤 넣습니다."
+            : "Codex에 맡기려면 앞 단계에서 [Codex에 연결]을 누르세요. 아래에 직접 적어도 됩니다."}</p>${waiting}${came}</div>`;
+      }
       function body() {
+        if (st.step === 5) return codexBody();
         if (st.step === 0) return `<p><b>Lecture Hub</b>는 수업 녹음을 글로 옮기고(전사) 슬라이드·달력과 묶어 복습을 돕는 앱입니다. 녹음은 내가 버튼을 눌렀을 때만 시작합니다.</p><p>처음 한 번만 아래 약속을 확인합니다. 모두 확인해야 시작할 수 있어요.</p>` +
           SETUP_NOTES.map((t, i) => `<label class="dlg-check"><input type="checkbox" data-note="${i}"> ${esc(t)}</label>`).join("");
         if (st.step === 1) return `<p>녹음, 전사, 정리본이 모이는 폴더입니다. 주 작업은 <b>_lecturehub</b>에 저장합니다. 녹음 보관용 복사본과 과목 정리본도 해당 학기 폴더에 추가할 수 있습니다.</p>
           <div class="row"><input id="su-parent" class="ask" value="${esc(st.parent)}" readonly><button data-act="pick">폴더 고르기</button></div>
           <div class="row"><label>학기 이름 <input id="su-term" class="ask short" value="${esc(st.term)}" maxlength="24"></label></div>
           <p class="hint">학기 폴더는 <b>${esc(st.parent)}\\${esc(st.term)}</b> 로 만들어집니다.</p>
-          ${st.trialOffer ? `<div class="trial-offer"><p><b>먼저 둘러보고 싶다면</b> — 합성 강의 1개(짧은 녹음·전사·슬라이드)와 그 정리본이 든 <b>체험 학기</b>를 앱 폴더에 만들어 엽니다. 실제 수업 자료는 쓰지 않고, 나중에 설정에서 내 학기 폴더를 정하면 빠져나옵니다.</p>
-            <button data-act="trial"${st.busy ? " disabled" : ""}>${st.busy ? "체험 학기 만드는 중…" : "체험 학기로 둘러보기"}</button></div>` : ""}`;
+          ${(st.parentNotes || []).map((n) => `<p class="hint warn">${ic("alert")} ${esc(n)}</p>`).join("")}
+          ${st.trialOffer ? `<div class="trial-offer"><p><b>먼저 둘러보고 싶다면</b> — 수문학·토질역학·관개배수공학의 일정, 전사와 정리본이 있는 <b>예시 학기</b>를 엽니다. 앱을 보여 주려고 만든 데이터입니다. 설정에서 내 학기 폴더로 바꿀 수 있습니다.</p>
+            <button data-act="trial"${st.busy ? " disabled" : ""}>${st.busy ? "예시 학기 만드는 중…" : "예시 학기로 둘러보기"}</button></div>` : ""}`;
         if (st.step === 2) return `<p>수강 과목과 시간을 적으면 수업 시간에 맞춰 과목이 골라지고 녹음할지 물어봐요. 나중에 설정의 '시간표·학기 편집'에서 고칠 수 있고, 지금은 비워 둬도 됩니다.</p>
+          ${waysBody()}
           <div class="row"><label>개강일(선택) <input type="date" id="su-start" class="ask" value="${esc(st.termStart || "")}"></label>
             <label>종강일(선택) <input type="date" id="su-end" class="ask" value="${esc(st.termEnd || "")}"></label></div>
           <div class="courses">${st.courses.map((c, i) => `<div class="crs" data-i="${i}">
@@ -3437,20 +4029,70 @@
           const note = st.style === "existing" ? `<p class="hint">이미 쓰는 폴더: 앞에서 고른 <b>${esc(st.parent)}</b> 폴더를 학기 폴더로 그대로 씁니다(그 안에 _lecturehub만 더합니다).</p>` : "";
           return layoutSection(st.layout, "setup", st.style) + note;
         }
-        const row = (t) => `<tr><td>${esc(t.label)}</td><td>${t.found ? "✓ 있음" : t.required ? "✕ 필요" : "– 없음"}</td><td>${esc(t.needed_for)}${t.found ? "" : `<br><small>${esc(t.hint)}</small>`}</td></tr>`;
+        const row = (t) => `<tr><td>${esc(t.label)}</td><td>${t.found ? ic("tick") + " 있음" : t.required ? ic("alert") + " 필요" : "– 없음"}</td><td>${esc(t.needed_for)}${t.found ? "" : `<br><small>${esc(t.hint)}</small>`}</td></tr>`;
         const all = Object.values(st.tools), need = all.filter((t) => t.required), lack = need.filter((t) => !t.found);
         const head = lack.length
           ? `<p class="err">녹음 파일을 마무리하는 데 필요한 프로그램(${lack.map((t) => esc(t.label)).join(", ")})이 없습니다. 아래 안내대로 설치한 뒤 앱을 다시 켜세요. 설정은 지금 저장해 둘 수 있습니다.</p>`
-          : `<p class="ok-line">✓ 녹음에 필요한 프로그램이 모두 있습니다. 바로 시작할 수 있어요.</p>`;
+          : `<p class="ok-line">${ic("tick")} 녹음에 필요한 프로그램이 모두 있습니다. 바로 시작할 수 있어요.</p>`;
         return `${head}<table class="tools">${need.map(row).join("")}</table>
           <details class="opt-tools"><summary>선택 프로그램 보기 — 없어도 녹음과 전사는 됩니다</summary><table class="tools">${all.filter((t) => !t.required).map(row).join("")}</table></details>`;
       }
       function draw() {
-        const last = st.step === steps.length - 1;
-        scrim.innerHTML = `<div class="dialog wide" role="dialog"><h4>처음 설정 · ${st.step + 1}/${steps.length} ${esc(steps[st.step])}</h4>${body()}
+        const at = ORDER.indexOf(st.step), last = at === ORDER.length - 1;
+        // once the folder is made the steps before it are behind: no way back to the folder or the Codex step's start
+        const back = at > 0 && st.step !== 5 && !(st.prepared && [1, 3].includes(st.step));
+        const label = last ? "설정 저장" : st.step === 5 && !linked() ? "건너뛰기" : "다음";
+        scrim.innerHTML = `<div class="dialog wide" role="dialog"><h4>처음 설정 · ${at + 1}/${ORDER.length} ${esc(steps[st.step])}</h4>${body()}
           ${st.error ? `<p class="err">${esc(st.error)}</p>` : ""}
-          <div class="acts">${st.step ? `<button data-act="back">이전</button>` : ""}<button class="primary" data-act="next"${st.busy ? " disabled" : ""}>${last ? "설정 저장" : "다음"}</button></div></div>`;
+          <div class="acts">${back ? `<button data-act="back">이전</button>` : ""}<button class="primary" data-act="next"${st.busy ? " disabled" : ""}>${label}</button></div></div>`;
         if (st.step === 0) scrim.querySelector('[data-act="next"]').disabled = true;
+      }
+      async function loadCodex(login) {  // what settings › 연결 shows for Codex: found, signed in; and the connection
+        st.codexChecking = !!login;
+        const r = await api.setup_codex_state(!!login);
+        st.codexChecking = false;
+        if (r && r.ok) {  // a quick read keeps the login result of the last check
+          const before = st.codex && st.codex.tool;
+          if (!login && before && r.tool && r.tool.signed_in == null) r.tool.signed_in = before.signed_in;
+          st.codex = r;
+        }
+        if (st.step === 5 || st.step === 2) draw();
+      }
+      function asRows(courses) { return (courses || []).map((c) => ({ name: c.name, slots: (c.slots || []).map((s) => ({ ...s })) })); }
+      function takeTimetable(r, arrived) {  // the file's content into the editor; typed courses not in it stay below
+        const names = new Set((r.courses || []).map((c) => c.name));
+        const kept = st.courses.filter((c) => c.name && !names.has(c.name));
+        const rows = asRows(r.courses).concat(kept);
+        st.courses = rows.length ? rows : [{ name: "", slots: [{ day: "월", start: "09:00", end: "10:15" }] }];
+        if (r.term && r.term.start) { st.termStart = r.term.start; st.termEnd = r.term.end; }
+        st.base = r.base || "";
+        if (arrived) { st.arrived = { count: (r.courses || []).length, kept: kept.length }; st.wait = ""; }
+      }
+      async function watchTimetable() {  // while the timetable step is open: did an AI app put a timetable in?
+        if (st.step !== 2 || !st.prepared || st.busy) return;
+        const r = await api.setup_timetable();
+        if (!r || !r.ok || st.step !== 2 || r.base === st.base) return;
+        readStep();  // what was typed so far is kept
+        takeTimetable(r, true);
+        draw();
+      }
+      function stopWatch() { if (st.timer) { clearInterval(st.timer); st.timer = null; } }
+      async function enter(step) {  // go to a step: start or stop what it needs
+        stopWatch();
+        st.step = step;
+        if (step === 3) loadLayout();
+        if (step === 5) { st.codex = null; draw(); await loadCodex(false); loadCodex(true); return; }
+        if (step === 2 && st.prepared) {
+          if (!st.codex) loadCodex(false);
+          const r = await api.setup_timetable();
+          if (r && r.ok) {
+            if (st.base && r.base !== st.base) takeTimetable(r, true);  // it arrived while another step was open
+            else if (!st.base && (r.courses || []).length) takeTimetable(r, false);  // e.g. the wizard was reopened
+            else st.base = r.base || "";
+          }
+          st.timer = setInterval(watchTimetable, 2000);  // never blocks: [다음] and typing work while it watches
+        }
+        draw();
       }
       function readStep() {
         if (st.step === 1) { const t = scrim.querySelector("#su-term"); if (t) st.term = t.value.trim(); }
@@ -3472,10 +4114,16 @@
       async function finish() {
         st.busy = true; st.error = ""; draw();
         const rows = st.courses.filter((c) => c.name);
-        const res = await api.setup_apply(st.parent, st.term, rows, st.termStart || "", st.termEnd || "", st.style || "");
+        const res = await api.setup_apply(st.parent, st.term, rows, st.termStart || "", st.termEnd || "", st.style || "", st.base || "");
         st.busy = false;
+        if (res && res.changed) {  // an AI app changed the timetable since it was shown: show the new one, save nothing
+          takeTimetable(res, false); st.arrived = null; await enter(2); st.error = res.error; draw(); return;
+        }
         if (!res.ok) { st.error = res.error || "저장하지 못했습니다."; draw(); return; }
+        stopWatch();
         scrim.innerHTML = `<div class="dialog wide" role="dialog"><h4>설정을 저장했어요</h4><p>앱을 다시 켜면 바로 쓸 수 있습니다. 지금은 앱을 닫습니다.</p>
+          ${(res.extra || []).length ? `<p>수업 시간을 넣지 않은 과목(${esc(res.extra.join(", "))})은 '수업 외'로 넣었습니다. 녹음할 때 과목 목록에서 고를 수 있고, 시간은 나중에 설정의 시간표에서 넣을 수 있습니다.</p>` : ""}
+          ${(res.skipped || []).length ? `<p>넣지 못한 과목: ${esc(res.skipped.map((x) => `${x.name} (${x.why})`).join(", "))}</p>` : ""}
           <div class="acts"><button class="primary" data-act="close">앱 닫기</button></div></div>`;
       }
       scrim.addEventListener("change", (e) => {
@@ -3490,26 +4138,62 @@
         const act = b.dataset.act, i = +b.dataset.i;
         if (act === "close") { await api.setup_close(); resolve(true); return; }
         readStep();
-        if (act === "pick") { const r = await api.setup_pick_folder(); if (r.path) st.parent = r.path; draw(); return; }
+        if (act === "pick") { const r = await api.setup_pick_folder(); if (r.path) { st.parent = r.path; st.parentNotes = r.notes || []; } draw(); return; }
         if (act === "trial") {
           st.busy = true; st.error = ""; draw();
           const r = await api.trial_start();
           st.busy = false;
-          if (!r || !r.ok) { st.error = (r && r.error) || "체험 학기를 만들지 못했습니다."; draw(); return; }
-          scrim.innerHTML = `<div class="dialog wide" role="dialog"><h4>체험 학기를 만들었어요</h4><p>'${esc(r.course || "체험 과목")}' 강의 1개와 정리본이 들어 있습니다. 앱을 다시 켜면 체험 학기로 열립니다.</p>
+          if (!r || !r.ok) { st.error = (r && r.error) || "예시 학기를 만들지 못했습니다."; draw(); return; }
+          scrim.innerHTML = `<div class="dialog wide" role="dialog"><h4>예시 학기를 만들었어요</h4><p>수문학·토질역학·관개배수공학의 수업과 정리본이 들어 있습니다. 앱을 다시 켜면 예시 학기로 열립니다.</p>
             <div class="acts"><button class="primary" data-act="close">앱 닫기</button></div></div>`;
           return;
         }
+        // D-086: the Codex step and the timetable step's two other ways
+        if (act === "codex-refind") { await loadCodex(true); return; }
+        if (act === "codex-help") { const r = await api.conn_open_help("codex"); if (r && !r.ok) { st.codexMsg = r.error; draw(); } return; }
+        if (act === "codex-connect") {  // one native dialog lists the three things; its token is passed on as it is
+          st.codexMsg = "";
+          const q = await api.ai_link_setup_confirm();
+          if (!q || !q.ok) { st.codexMsg = (q && q.error) || "연결하지 못했습니다."; draw(); return; }
+          if (!q.yes) return;
+          const r = await api.ai_link_setup_connect(q.token);
+          st.codexMsg = r && r.ok ? "" : (r && r.error) || "연결하지 못했습니다.";
+          await loadCodex(false); return;
+        }
+        if (act === "tt-photo-setup") {  // D-083's flow: native file picker + native confirmation, then Codex with the picture
+          st.error = "";
+          const q = await api.timetable_photo_confirm();
+          if (!q || !q.ok) { st.error = (q && q.error) || "사진을 열지 못했습니다."; draw(); return; }
+          if (!q.yes) return;
+          const r = await api.timetable_photo_open(q.token);
+          if (r && r.ok) { st.wait = "photo"; st.arrived = null; } else st.error = (r && r.error) || "Codex를 열지 못했습니다.";
+          draw(); return;
+        }
+        if (act === "codex-first") {
+          st.error = "";
+          const r = await api.setup_codex_open();
+          if (r && r.ok) { st.wait = "codex"; st.arrived = null; } else st.error = (r && r.error) || "Codex를 열지 못했습니다.";
+          draw(); return;
+        }
+        if (act === "wait-stop") { st.wait = ""; draw(); return; }  // the timetable is still taken when it comes
         if (act === "add") st.courses.push({ name: "", slots: [{ day: "월", start: "09:00", end: "10:15" }] });
         else if (act === "slot") st.courses[i].slots.push({ day: "수", start: "09:00", end: "10:15" });
         else if (act === "del") st.courses.splice(i, 1);
-        else if (act === "back") st.step -= 1;
+        else if (act === "back") { st.error = ""; await enter(ORDER[Math.max(0, ORDER.indexOf(st.step) - 1)]); return; }
         else if (act === "next") {
           if (st.step === 1 && (!st.parent || !st.term)) { st.error = "폴더와 학기 이름을 정해 주세요."; draw(); return; }
           st.error = "";
-          if (st.step === steps.length - 1) { await finish(); return; }
-          st.step += 1;
-          if (st.step === 3) loadLayout();
+          const at = ORDER.indexOf(st.step);
+          if (at === ORDER.length - 1) { await finish(); return; }
+          if (st.step === 0 && st.prepared) { await enter(5); return; }  // reopened half-way: the folder is there
+          if (st.step === 3 && !st.prepared) {  // end of 폴더 구성: make the folder now, so Codex can write into it
+            st.busy = true; draw();
+            const r = await api.setup_prepare(st.parent, st.term, st.style || "");
+            st.busy = false;
+            if (!r || !r.ok) { st.error = (r && r.error) || "폴더를 만들지 못했습니다."; draw(); return; }
+            st.prepared = r.root; st.base = r.base || "";
+          }
+          await enter(ORDER[at + 1]); return;
         }
         draw();
       });
@@ -3526,11 +4210,53 @@
     retry.onclick = () => location.reload();
     retry.focus();
   }
+  /* pywebview announces its bridge again in the same page when a navigation was refused (the window is kept on the
+     app's own page, ui/app.py guard_navigation): it then builds a new bridge object and the answers to calls that
+     were out are lost. Starting the page a second time would bind every handler twice, so the second time only the
+     new bridge is taken and the state poll, which may be waiting for an answer that will not come, is restarted. */
+  let booted = false;
   async function start() {
+    if (booted) {
+      api = window.pywebview.api;
+      polling = false; pollFails = 0; schedulePoll();
+      return;
+    }
+    booted = true;
     try { await startApp(); } catch (err) { startFailed(err); }
   }
   // a background load that failed (bridge busy, file locked): say so once in a while instead of failing silently
-  const report = (what) => { try { if (api && api.client_error) api.client_error(String(what).slice(0, 2000)).catch(() => {}); } catch (_) { /* never loop */ } };
+  // Returns true when the line was sent or is kept for sending. Before the Python bridge exists (`api` is set in
+  // startApp) nothing can be sent, so up to REPORT_KEEP lines wait and go out as soon as it does (flushReports).
+  const REPORT_KEEP = 40, reportsWaiting = [];
+  const report = (what) => {
+    const text = String(what).slice(0, 2000);
+    try {
+      if (api && api.client_error) { api.client_error(text).catch(() => {}); return true; }
+      if (!api && reportsWaiting.length < REPORT_KEEP) { reportsWaiting.push(text); return true; }
+    } catch (_) { /* never loop */ }
+    return false;
+  };
+  const flushReports = () => { for (const text of reportsWaiting.splice(0)) report(text); };
+  // the page's own Content-Security-Policy (index.html) blocked something: it must show up in the app log, because
+  // a policy that is too strict would otherwise break a screen without a trace. Two sources, one list of what was
+  // already said: the event (from here on) and a ReportingObserver with `buffered`, which also hands over what was
+  // blocked BEFORE this script ran (the stylesheet, german.js, anything in the markup above) - so no earlier
+  // listener is needed (tried against the engine: tests/test_release_csp.py). A block is marked as said only when
+  // report() took it.
+  const cspSeen = new Set();
+  const cspBlocked = (directive, blocked, file, line) => {
+    const key = `${directive} ${blocked}`;
+    if (cspSeen.has(key) || cspSeen.size > 20) return;
+    if (report(`csp: ${directive} blocked ${String(blocked).slice(0, 120)} @ ${file || ""}:${line || 0}`)) cspSeen.add(key);
+  };
+  document.addEventListener("securitypolicyviolation", (e) => cspBlocked(e.violatedDirective, e.blockedURI, e.sourceFile, e.lineNumber));
+  let cspObserver = null;  // kept for the life of the page
+  try {
+    cspObserver = new ReportingObserver((list) => {
+      for (const r of list) { const b = r.body || {}; if (r.type === "csp-violation") cspBlocked(b.effectiveDirective, b.blockedURL, b.sourceFile, b.lineNumber); }
+    }, { types: ["csp-violation"], buffered: true });
+    cspObserver.observe();
+  } catch (_) { /* an engine without ReportingObserver: the event above still reports what happens from now on */ }
   window.addEventListener("error", (e) => report(`error: ${e.message} @ ${e.filename}:${e.lineno}:${e.colno} ${(e.error && e.error.stack) || ""}`));
   window.addEventListener("unhandledrejection", (e) => {
     console.error(e.reason);
@@ -3540,19 +4266,25 @@
   });
   async function startApp() {
     api = window.pywebview.api;
+    flushReports();  // what was blocked or failed while the page loaded, before the bridge existed
     const [info, appearance, ai] = await Promise.all([api.init(), api.appearance(), api.ai_status()]);
+    api.ai_link_state().then((x) => { ui.aiLink = x; }).catch(() => {});
     ui.info = info;
     applyAppearance(appearance);
     ui.ai = ai;
     if (matchMedia("(max-width: 1180px)").matches) { ui.sideHidden = true; ui.sideInHome = false; }
-    if (ui.info.needs_setup) { try { applyLabs(); } catch (_) { /* edition buttons only */ } await runSetup(); return; }  // first run: the wizard saves the folder and closes the app
+    applyLabs();  // before the first-run wizard too: the page behind it must not show features this edition lacks
+    if (ui.info.needs_setup) { await runSetup(); return; }  // first run: the wizard saves the folder and closes the app
     if (ui.info.trial) {  // synthetic trial semester: one line on top until the user picks a real folder
       const bar = document.createElement("div");
       bar.className = "trial-bar";
-      bar.innerHTML = `<span>체험 학기를 보고 있어요 · 합성 강의 1개로 녹음→전사→정리본 흐름을 보여 줍니다</span><button class="primary" id="trialLeave">내 학기 폴더 정하기</button>`;
+      bar.innerHTML = `<span>예시 학기 · 앱을 보여 주려고 만든 수업 자료입니다</span><button class="primary" id="trialLeave">내 학기 폴더 정하기</button>`;
       document.body.prepend(bar);
       bar.querySelector("#trialLeave").onclick = () => runSetup();
     }
+    api.update_status(true).then((u) => {  // at most one request a day; says nothing when offline or up to date
+      if (u && u.available) toast(`새 버전 ${u.latest}이 나왔습니다 · 설정 › 기본 › 알림 · 업데이트에서 내려받기 페이지를 열 수 있어요`);
+    }).catch(() => {});
     ui.course = ui.info.course || "";
     ui.courseSource = ui.course ? "timetable_auto" : "unknown";  // D-052: a timetable pre-fill is not a user pick
     { const s = ui.course && sourceFor(ui.course); if (s) { ui.mic = s.src !== "pc"; ui.pc = s.src !== "mic"; } }
@@ -3570,6 +4302,7 @@
     const single = (fn) => { let busy = false; return async () => { if (busy) return; busy = true; try { await fn(); } catch (err) { /* next tick */ } finally { busy = false; } }; };
     setInterval(single(loadNotices), 120000);  // the inbox file; app.py also pushes a new notice right away
     setInterval(single(loadEngines), 60000);  // use by running jobs, Pacific-midnight refill, Groq's rolling hour/day
+    setInterval(single(refreshTodayCard), 60000);  // D-079: keep today's card current across midnight and due times
     setInterval(single(async () => { if (ui.view === "lecture") await renderLectureEngines(); }), 20000);  // job progress on the open lecture
     setInterval(single(async () => { await refreshCourse(); }), 60000);  // the class moves on
     await syncSelection();
